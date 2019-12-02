@@ -1,0 +1,29 @@
+scope:
+    couple_dir: "."
+
+echam:
+    type: atmosphere
+    griddes: T63
+    send:
+        ice:
+            temp2:
+                files:
+                    pattern: ${EXP_ID}_echam6_echam_??????.nc
+                    take:
+                        newest: 12
+                transformation: null
+
+
+pism:
+    type: ice
+    griddes: ice.griddes
+    recieve:
+        atmosphere:
+            temp2:
+                interp: bil
+                transformation:
+                    - expr: "air_temp=temp2-273.15"
+        ocean:
+    send:
+        atmosphere:
+        ocean:
