@@ -24,7 +24,7 @@ echam:
                     dir: "/work/ollie/pgierz/scope_tests/outdata/echam/"
                     pattern: "{{ EXP_ID }}_echam6_echam_{{ DATE_PATTERN }}.grb"
                     take:
-                        newest: 24
+                        newest: 12
                 code table: "/work/ollie/pgierz/scope_tests/outdata/echam/PI_1x10_185001.01_echam.codes"
             aprc:
                 files:

@@ -85,12 +85,7 @@ def preprocess(config_path, whos_turn):
     print(80 * "-")
 
     preprocessor = Preprocess(config, whos_turn)
-    for (sender_type, sender_args) in preprocessor._all_senders():
-        for variable_name, variable_dict in sender_args.items():
-            print("The following files will be used for:", variable_name)
-            preprocessor._make_tmp_files_for_variable(variable_name, variable_dict)
-        preprocessor._combine_tmp_variable_files(sender_type)
-
+    preprocessor.preprocess()
 
 if __name__ == "__main__":
     sys.exit(main())  # pragma: no cover

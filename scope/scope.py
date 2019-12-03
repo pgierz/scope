@@ -2,6 +2,7 @@
 
 """Main module."""
 
+import logging
 import os
 import re
 import subprocess
@@ -41,6 +42,13 @@ class Scope(object):
 
 
 class Preprocess(Scope):
+    def preprocess(self):
+        for (sender_type, sender_args) in self._all_senders():
+            for variable_name, variable_dict in sender_args.items():
+                logging.debug("The following files will be used for:", variable_name)
+                self._make_tmp_files_for_variable(variable_name, variable_dict)
+            self._combine_tmp_variable_files(sender_type)
+
     def _all_senders(self):
         if self.config[self.whos_turn].get("send"):
             for reciever_type in self.config[self.whos_turn].get("send"):
@@ -50,6 +58,19 @@ class Preprocess(Scope):
                 )
 
     def _construct_filelist(self, var_dict):
+        """
+
+        Example
+        -------
+        The variable configuration dictionary can have the following top-level **keys**:
+        * ``files`` may contain:
+            * a ``filepattern`` in regex to look for
+            * ``take`` which files to take, either specific, or
+              ``newest``/``latest`` followed by an integer.
+            * ``dir`` a directory where to look for the files. Note that if
+              this is not provided, the default is to fall back to the top level
+              ``outdata_dir`` for the currently sending model.
+        """
         r = re.compile(var_dict["files"]["pattern"])
         file_directory = var_dict["files"].get(
             "dir", self.config[self.whos_turn].get("outdata_dir")
@@ -78,6 +99,39 @@ class Preprocess(Scope):
             return matching_files
 
     def _make_tmp_files_for_variable(self, varname, var_dict):
+        """
+        Generates temporary files for further processing with ``scope``.
+
+        Given a variable name and a description dictionary of how it should be
+        extracted and processed, this method makes a temporary file,
+        ``<sender_name>_<varname>_file_for_scope.nc``, e.g.
+        ``echam_temp2_file_for_scope.nc`` in the ``couple_dir``.
+
+        Parameters
+        ----------
+        varname : str
+            Variable name as that should be selected from the files
+        var_dict : dict
+            A configuration dictionary describing how the variable should be
+            extracted. An example is given in ``_construct_filelist``.
+
+        Notes
+        -----
+        In addition to the dictionary description of ``files``, further
+        information may be added with the following top-level keys:
+
+        * ``code table`` describing which ``GRIB`` code numbers correspond to
+          which variables. If not given, the fallback value is the value of
+          ``code table`` in the sender configuration.
+
+        Returns
+        -------
+        None
+
+        Notes
+        -----
+        Converts any input file to ``nc`` via `cdo`. Runs both ``select`` and ``settable``.
+        """
         flist = self._construct_filelist(var_dict)
         for f in flist:
             print("- ", f)
@@ -107,8 +161,31 @@ class Preprocess(Scope):
         click.secho(cdo_command, fg="cyan")
         subprocess.run(cdo_command, shell=True, check=True)
 
+    # TODO/FIXME: This function does not work correctly if there are different
+    # time axis for each variable. It might be better to just leave each
+    # variable in it's own file.
     def _combine_tmp_variable_files(self, reciever_type):
-        """ Combines all files in the couple directory for a particular reciever type """
+        """
+        Combines all files in the couple directory for a particular reciever type.
+
+        Depending on the configuration, this method combines all files found in
+        the ``couple_dir`` which may have been further processed by ``scope``
+        to a file ``<sender_type>_file_for_<reciever_type>.nc``
+
+        Parameters
+        ----------
+        reciever_type : str
+            Which reciever the model is sending to, e.g. ice, ocean, atmosphere
+
+        Returns
+        -------
+        None
+
+        Note
+        ----
+        This executes a ``cdo mergetime`` command to concatenate all files found which
+        should be sent to particular model.
+        """
         print(reciever_type)
         reciever = (
             self.config.get(self.whos_turn, {}).get("send", {}).get(reciever_type, {})
@@ -125,7 +202,7 @@ class Preprocess(Scope):
                 )
         cdo_command = (
                 self.get_cdo_prefix()
-                + " cat "
+                + " mergetime "
                 + " ".join(files_to_combine)
                 + " "
                 + output_file
