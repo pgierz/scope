@@ -3,13 +3,10 @@ SCOPE: A Script Based Coupler for Simulations of the Earth System
 =================================================================
 
 
-.. .. image:: https://img.shields.io/pypi/v/scope.svg
-..        :target: https://pypi.python.org/pypi/scope
+.. image:: https://img.shields.io/pypi/v/scope-coupler.svg
+        :target: https://pypi.python.org/pypi/scope-coupler
 
-.. .. image:: https://img.shields.io/travis/pgierz/scope.svg
-..        :target: https://travis-ci.org/pgierz/scope
-
- .. image:: https://readthedocs.org/projects/scope-coupler/badge/?version=latest
+.. image:: https://readthedocs.org/projects/scope-coupler/badge/?version=latest
         :target: https://scope-coupler.readthedocs.io/en/latest/?badge=latest
         :alt: Documentation Status
 
