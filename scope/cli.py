@@ -5,7 +5,9 @@ import sys
 import click
 import yaml
 
-from scope import Regrid
+import jinja2
+
+from scope import Regrid, Preprocess
 
 
 YAML_AUTO_EXTENSIONS = ["", ".yml", ".yaml", ".YML", ".YAML"]
@@ -30,7 +32,16 @@ def yaml_file_to_dict(filepath):
     for extension in YAML_AUTO_EXTENSIONS:
         try:
             with open(filepath + extension) as yaml_file:
-                return yaml.load(yaml_file, Loader=yaml.FullLoader)
+                yaml_contents = yaml_file.read()
+                # Open the template
+                template = jinja2.Template(yaml_contents)
+                # Parse the template from YAML to a dict
+                preparsed_dict = yaml.load(yaml_contents, Loader=yaml.FullLoader)
+                #
+                outputText = template.render(**preparsed_dict["template_replacements"])
+                parsed_dict = yaml.load(outputText)
+                del parsed_dict["template_replacements"]
+                return parsed_dict
         except IOError as error:
             logger.debug(
                 "IOError (%s) File not found with %s, trying another extension pattern.",
@@ -53,10 +64,32 @@ def main(args=None):
 
 @main.command()
 @click.argument("config_path", type=click.Path(exists=True))
-def regrid(config_path):
+@click.argument("whos_turn")
+def regrid(config_path, whos_turn):
     config = yaml_file_to_dict(config_path)
-    regridder = Regrid(config, "pism")
+    regridder = Regrid(config, whos_turn)
     regridder.regrid()
+
+
+@main.command()
+@click.argument("config_path", type=click.Path(exists=True))
+@click.argument("whos_turn")
+def preprocess(config_path, whos_turn):
+    config = yaml_file_to_dict(config_path)
+
+    print(80 * "-")
+    import pprint
+
+    pp = pprint.PrettyPrinter(indent=4)
+    pp.pprint(config)
+    print(80 * "-")
+
+    preprocessor = Preprocess(config, whos_turn)
+    for (sender_type, sender_args) in preprocessor._all_senders():
+        for variable_name, variable_dict in sender_args.items():
+            print("The following files will be used for:", variable_name)
+            preprocessor._make_tmp_files_for_variable(variable_name, variable_dict)
+        preprocessor._combine_tmp_variable_files(sender_type)
 
 
 if __name__ == "__main__":

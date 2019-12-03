@@ -2,13 +2,18 @@
 
 """Main module."""
 
-import subprocess
 import os
+import re
+import subprocess
 
 import click
 
 
 def determine_cdo_openMP():
+    """
+    Checks if the ``cdo`` version being used supports ``OpenMP``; useful to
+    check if you need a ``-P`` flag or not.
+    """
     cmd = "cdo --version"
     cdo_ver = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT)
     cdo_ver = cdo_ver.decode("utf-8")
@@ -18,88 +23,117 @@ def determine_cdo_openMP():
     return False
 
 
-class SimObj(object):
-
-    NAME = "Generic Sim Object"
-
-    def after_run(self):
-        print(
-            "This hook could be run after a supercompter job is finished for ",
-            self.NAME,
-        )
-
-    def before_recieve(self):
-        print("This hook could be run recieving information into the generic layer!")
-
-    def before_send(self):
-        print(
-            "This hook could be run before sending information into the generic layer!"
-        )
-
-    def send(self):
-        raise NotImplementedError("You haven't overriden the send method, sorry!")
-
-    def recieve(self):
-        raise NotImplementedError("You haven't overriden the recieve method, sorry!")
-
-
-class Model(SimObj):
-
-    NAME = "Generic Model Object"
-
-    def __init__(self):
-        print("Model set up!")
-
-
-class Component(SimObj):
-
-    NAME = "Generic Component Object"
-
-    def __init__(self):
-        print("Component set up!")
-
-
 class Scope(object):
     def __init__(self, config, whos_turn):
         self.config = config
         self.whos_turn = whos_turn
 
-    def get_cdo_prefix(self, has_openMP=determine_cdo_openMP()):
+        if not os.path.isdir(config["scope"]["couple_dir"]):
+            os.makedirs(config["scope"]["couple_dir"])
+
+    def get_cdo_prefix(self, has_openMP=None):
+        if not has_openMP:
+            has_openMP = determine_cdo_openMP()
         if has_openMP:
-            return "cdo -P " + str(self.config["number openMP processes"])
+            return "cdo -P " + str(self.config["scope"]["number openMP processes"])
         else:
             return "cdo"
 
 
 class Preprocess(Scope):
-    def all_senders(self):
+    def _all_senders(self):
         if self.config[self.whos_turn].get("send"):
-            for sender in self.config[self.whos_turn].get("send"):
-                yield {sender: self.config[self.whos_turn]["send"][sender]}
+            for reciever_type in self.config[self.whos_turn].get("send"):
+                yield (
+                    reciever_type,
+                    self.config[self.whos_turn]["send"][reciever_type],
+                )
 
     def _construct_filelist(self, var_dict):
         r = re.compile(var_dict["files"]["pattern"])
-        all_files = os.listdir(
-            var_dict["files"].get(
-                "directory", self.config[self.whos_turn].get("outdata_directory")
-            )
+        file_directory = var_dict["files"].get(
+            "dir", self.config[self.whos_turn].get("outdata_dir")
         )
+
+        all_files = []
+        for rootname, _, filenames in os.walk(file_directory):
+            for filename in filenames:
+                full_name = os.path.join(rootname, filename)
+                all_files.append(full_name)
+            break  # Do not go into subdirectories
+
         # Just the matching files:
-        # TODO: Fix the sorted, its probably wrong...
-        matching_files = sorted(
-            [f for f in all_files if r.match(f)], key=lambda x: os.path.getmtime(x)
-        )
+        matching_files = sorted([f for f in all_files if r.match(os.path.basename(f))])
         if "take" in var_dict["files"]:
             if "newest" in var_dict["files"]["take"]:
                 take = var_dict["files"]["take"]["newest"]
-                return matching_files[:take]
+                return matching_files[-take:]
             elif "oldest" in var_dict["files"]["take"]:
                 take = var_dict["files"]["take"]["oldest"]
-                return reversed(matching_files[:take])
+                return matching_files[:take]
+            # FIXME: This is wrong:
             elif "specific" in var_dict["files"]["take"]:
                 return var_dict["files"]["take"]["specific"]
         else:
             return matching_files
+
+    def _make_tmp_files_for_variable(self, varname, var_dict):
+        flist = self._construct_filelist(var_dict)
+        for f in flist:
+            print("- ", f)
+        code_table = var_dict.get(
+            "code table", self.config[self.whos_turn].get("code table")
+        )
+        cdo_command = (
+            self.get_cdo_prefix()
+            + " -f nc -t "
+            + code_table
+            + " -select,name="
+            + varname
+            + " "
+            + " ".join(flist)
+            + " "
+            + self.config["scope"]["couple_dir"]
+            + "/"
+            + self.whos_turn
+            + "_"
+            + varname
+            + "_file_for_scope.nc"
+        )
+
+        click.secho(
+            "Selecting %s for further processing with SCOPE..." % varname, fg="cyan"
+        )
+        click.secho(cdo_command, fg="cyan")
+        subprocess.run(cdo_command, shell=True, check=True)
+
+    def _combine_tmp_variable_files(self, reciever_type):
+        """ Combines all files in the couple directory for a particular reciever type """
+        print(reciever_type)
+        reciever = (
+            self.config.get(self.whos_turn, {}).get("send", {}).get(reciever_type, {})
+        )
+        variables_to_send_to_reciever = list(reciever)
+        files_to_combine = []
+        for f in os.listdir(self.config["scope"]["couple_dir"]):
+            fvar = f.replace(self.whos_turn+"_", "").replace("_file_for_scope.nc", "")
+            if fvar in variables_to_send_to_reciever:
+                files_to_combine.append(os.path.join(self.config["scope"]["couple_dir"], f))
+        output_file = os.path.join(
+                self.config["scope"]["couple_dir"],
+                self.config[self.whos_turn]['type'] + "_file_for_" + reciever_type+".nc"
+                )
+        cdo_command = (
+                self.get_cdo_prefix()
+                + " cat "
+                + " ".join(files_to_combine)
+                + " "
+                + output_file
+                )
+        click.secho("Combine files for sending to %s" % reciever_type, fg="cyan")
+        click.secho(cdo_command, fg="cyan")
+        subprocess.run(cdo_command, shell=True, check=True)
+
 
 
 class Regrid(Scope):
@@ -114,8 +148,12 @@ class Regrid(Scope):
             + " gen"
             + Interp
             + ","
+            + self.config["scope"]["couple_dir"]
+            + "/"
             + self.config[Model]["griddes"]
             + " "
+            + self.config["scope"]["couple_dir"]
+            + "/"
             + Type
             + "_file_for_"
             + self.config[Model]["type"]

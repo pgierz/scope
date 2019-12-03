@@ -1,3 +1,5 @@
+# All grid description files
+*.griddes
 # All netcdf files:
 *.nc
 # Byte-compiled / optimized / DLL files
