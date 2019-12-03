@@ -3,24 +3,24 @@ SCOPE: A Script Based Coupler for Simulations of the Earth System
 =================================================================
 
 
-.. image:: https://img.shields.io/pypi/v/scope.svg
-        :target: https://pypi.python.org/pypi/scope
+.. .. image:: https://img.shields.io/pypi/v/scope.svg
+..        :target: https://pypi.python.org/pypi/scope
 
-.. image:: https://img.shields.io/travis/pgierz/scope.svg
-        :target: https://travis-ci.org/pgierz/scope
+.. .. image:: https://img.shields.io/travis/pgierz/scope.svg
+..        :target: https://travis-ci.org/pgierz/scope
 
-.. image:: https://readthedocs.org/projects/scope/badge/?version=latest
-        :target: https://scope.readthedocs.io/en/latest/?badge=latest
+ .. image:: https://readthedocs.org/projects/scope-coupler/badge/?version=latest
+        :target: https://scope-coupler.readthedocs.io/en/latest/?badge=latest
         :alt: Documentation Status
 
 
 
 
-Python Boilerplate contains all the boilerplate you need to create a Python package.
-
+``scope`` is a offline, script-based coupler for various simulations of the
+Earth System. It is written in Python and configured with YAML files.
 
 * Free software: GNU General Public License v3
-* Documentation: https://scope.readthedocs.io.
+* Documentation: https://scope-coupler.readthedocs.io.
 
 
 Features
