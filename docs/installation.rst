@@ -8,13 +8,16 @@ Installation
 Stable release
 --------------
 
-To install SCOPE: A Script Based Coupler for Simulations of the Earth System, run this command in your terminal:
+To install scope, run this command in your terminal:
 
 .. code-block:: console
 
-    $ pip install scope
+    $ pip install scope-coupler
 
-This is the preferred method to install SCOPE: A Script Based Coupler for Simulations of the Earth System, as it will always install the most recent stable release.
+This is the preferred method to install scope, as it will always install the most recent stable release.
+
+.. warning::
+    Since ``scope`` is still under active development, there is no "stable release" yet.
 
 If you don't have `pip`_ installed, this `Python installation guide`_ can guide
 you through the process.
@@ -26,19 +29,19 @@ you through the process.
 From sources
 ------------
 
-The sources for SCOPE: A Script Based Coupler for Simulations of the Earth System can be downloaded from the `Github repo`_.
+The sources for scope can be downloaded from AWI's `Gitlab repo`_.
 
 You can either clone the public repository:
 
 .. code-block:: console
 
-    $ git clone git://github.com/pgierz/scope
+    $ git clone git://gitlab.awi.de/pgierz/scope
 
 Or download the `tarball`_:
 
 .. code-block:: console
 
-    $ curl  -OL https://github.com/pgierz/scope/tarball/master
+    $ curl  -OL https://gitlab.awi.de/pgierz/scope/tarball/master
 
 Once you have a copy of the source, you can install it with:
 
@@ -47,5 +50,5 @@ Once you have a copy of the source, you can install it with:
     $ python setup.py install
 
 
-.. _Github repo: https://github.com/pgierz/scope
-.. _tarball: https://github.com/pgierz/scope/tarball/master
+.. _Gitlab repo: https://gitlab.awi.de/pgierz/scope
+.. _tarball: https://gitlab.awi.de/pgierz/scope/tarball/master

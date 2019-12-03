@@ -1,5 +1,5 @@
-Welcome to SCOPE: A Script Based Coupler for Simulations of the Earth System's documentation!
-======================================
+SCOPE Documentation
+===================
 
 .. toctree::
    :maxdepth: 2
