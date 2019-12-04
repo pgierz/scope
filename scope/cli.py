@@ -48,9 +48,7 @@ def yaml_file_to_dict(filepath):
                 error.errno,
                 filepath + extension,
             )
-    raise FileNotFoundError(
-        "All file extensions tried and none worked for %s" % filepath
-    )
+    raise FileNotFoundError("All file extensions tried and none worked for %s" % filepath)
 
 
 @click.group()

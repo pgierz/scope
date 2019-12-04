@@ -20,7 +20,10 @@ The following classes are defined here:
 
 * ``Scope`` -- an abstract base class useful for starting other classes from.
   This provides a way to determine if ``cdo`` has openMP support or not by
-  parsing ``cdo --version``.
+  parsing ``cdo --version``. Additionally, it has a nested class which gives
+  you decorators to put around methods for enabling arbitrary shell calls
+  before and after the method is executed, which can be configured via the
+  ``Scope.config`` dictionary.
 
 * ``Preprocess`` -- a class to extract and combine various NetCDF files for
   further processing.
@@ -67,10 +70,27 @@ class Scope(object):
         """
         Base class for various Scope objects. Other classes should extend this one.
 
+        Parameters
+        ----------
+        config : dict
+            A dictionary (normally recieved from a YAML file) describing the
+            ``scope`` configuration. An example dictionary is included in the root
+            directory under ``examples/scope_config.yaml``
+        whos_turn : str
+            An explicit model name telling you which model is currently
+            interfacing with ``scope`` e.g. ``echam`` or ``pism``.
+
+        Warning
+        -------
+        This function has a filesystem side-effect: it generates the couple
+        folder defined in ``config["scope"]["couple_dir"]``. If you don't have
+        permissions to create this folder, the object initialization will
+        fail...
+
         Some design features are listed below:
 
-        ``pre`` and ``post`` hooks
-        --------------------------
+        * **``pre`` and ``post`` hooks**
+        --------------------------------
 
         Any appropriately decorated method of a ``scope`` object has a hook to
         call a script with specific arguments and flags before and after the
@@ -78,7 +98,7 @@ class Scope(object):
         subclass has a method "preprocess". Here is the order the program will
         execute in, given the following configuration:
 
-        .. code ::
+        .. code :: yaml
 
             pre_preprocess:
                 program: /some/path/to/an/executable
@@ -99,31 +119,17 @@ class Scope(object):
                 flags:
                     - "--different_flag value3"
 
-        Given this configuration, an idealized system call would look like:
+        Given this configuration, an idealized system call would look like the
+        example shown below. Note however that the Python program calls the
+        shell and immediately destroys it again, so any variables exported to
+        the environment (probably) don't survive:
 
-        .. code ::
+        .. code :: shell
 
             $ ./pre_preprocess['program'] list of arguments --flag value1 --different_flag value2
             $ <... python call to preprocess method ...>
             $ ./post_preprocess['program'] A B C --different_flag value 3
 
-
-        Parameters
-        ----------
-        config : dict
-            A dictionary (normally recieved from a YAML file) describing the
-            ``scope`` configuration. An example dictionary is included in the root
-            directory under ``examples/scope_config.yaml``
-        whos_turn : str
-            An explicit model name telling you which model is currently
-            interfacing with ``scope`` e.g. ``echam`` or ``pism``.
-
-        Warning
-        -------
-        This function has a filesystem side-effect: it generates the couple
-        folder defined in ``config["scope"]["couple_dir"]``. If you don't have
-        permissions to create this folder, the object initialization will
-        fail...
         """
         self.config = config
         self.whos_turn = whos_turn
@@ -159,29 +165,26 @@ class Scope(object):
             return "cdo"
 
     class ScopeDecorators(object):
+        """Contains decorators you can use on class methods"""
+
         # PG: Why is it a classmethod? I don't understand this yet...
         @classmethod
         def pre_hook(cls, meth):
+            """ Based upon the ``self.config``, runs a specific system command
+
+            Using the method name, you can define
+
+            """
             # Did you ask yourself -- What's wraps? See:
             # https://www.thecodeship.com/patterns/guide-to-python-function-decorators/
             @wraps(meth)
             def wrapped_meth(self, *args):
-                program_to_call = (
-                    self.config[self.whos_turn]
-                    .get("pre_" + meth.__name__, {})
-                    .get("program")
-                )
+                program_to_call = self.config[self.whos_turn].get("pre_" + meth.__name__, {}).get("program")
 
-                flags_for_program = (
-                    self.config[self.whos_turn]
-                    .get("pre_" + meth.__name__, {})
-                    .get("flags_for_program")
-                )
+                flags_for_program = self.config[self.whos_turn].get("pre_" + meth.__name__, {}).get("flags_for_program")
 
                 arguments_for_program = (
-                    self.config[self.whos_turn]
-                    .get("pre_" + meth.__name__, {})
-                    .get("arguments_for_program")
+                    self.config[self.whos_turn].get("pre_" + meth.__name__, {}).get("arguments_for_program")
                 )
 
                 full_process = program_to_call
@@ -201,22 +204,12 @@ class Scope(object):
             @wraps(meth)
             def wrapped_meth(*args):
                 meth(*args)
-                program_to_call = (
-                    self.config[self.whos_turn]
-                    .get("pre_" + meth.__name__, {})
-                    .get("program")
-                )
+                program_to_call = self.config[self.whos_turn].get("pre_" + meth.__name__, {}).get("program")
 
-                flags_for_program = (
-                    self.config[self.whos_turn]
-                    .get("pre_" + meth.__name__, {})
-                    .get("flags_for_program")
-                )
+                flags_for_program = self.config[self.whos_turn].get("pre_" + meth.__name__, {}).get("flags_for_program")
 
                 arguments_for_program = (
-                    self.config[self.whos_turn]
-                    .get("pre_" + meth.__name__, {})
-                    .get("arguments_for_program")
+                    self.config[self.whos_turn].get("pre_" + meth.__name__, {}).get("arguments_for_program")
                 )
 
                 full_process = program_to_call
@@ -306,9 +299,7 @@ class Preprocess(Scope):
               ``outdata_dir`` for the currently sending model.
         """
         r = re.compile(var_dict["files"]["pattern"])
-        file_directory = var_dict["files"].get(
-            "dir", self.config[self.whos_turn].get("outdata_dir")
-        )
+        file_directory = var_dict["files"].get("dir", self.config[self.whos_turn].get("outdata_dir"))
 
         all_files = []
         for rootname, _, filenames in os.walk(file_directory):
@@ -369,9 +360,7 @@ class Preprocess(Scope):
         flist = self._construct_filelist(var_dict)
         for f in flist:
             print("- ", f)
-        code_table = var_dict.get(
-            "code table", self.config[self.whos_turn].get("code table")
-        )
+        code_table = var_dict.get("code table", self.config[self.whos_turn].get("code table"))
         cdo_command = (
             self.get_cdo_prefix()
             + " -f nc -t "
@@ -389,9 +378,7 @@ class Preprocess(Scope):
             + "_file_for_scope.nc"
         )
 
-        click.secho(
-            "Selecting %s for further processing with SCOPE..." % varname, fg="cyan"
-        )
+        click.secho("Selecting %s for further processing with SCOPE..." % varname, fg="cyan")
         click.secho(cdo_command, fg="cyan")
         subprocess.run(cdo_command, shell=True, check=True)
 
@@ -421,28 +408,18 @@ class Preprocess(Scope):
         should be sent to particular model.
         """
         print(reciever_type)
-        reciever = (
-            self.config.get(self.whos_turn, {}).get("send", {}).get(reciever_type, {})
-        )
+        reciever = self.config.get(self.whos_turn, {}).get("send", {}).get(reciever_type, {})
         variables_to_send_to_reciever = list(reciever)
         files_to_combine = []
         for f in os.listdir(self.config["scope"]["couple_dir"]):
             fvar = f.replace(self.whos_turn + "_", "").replace("_file_for_scope.nc", "")
             if fvar in variables_to_send_to_reciever:
-                files_to_combine.append(
-                    os.path.join(self.config["scope"]["couple_dir"], f)
-                )
+                files_to_combine.append(os.path.join(self.config["scope"]["couple_dir"], f))
         output_file = os.path.join(
             self.config["scope"]["couple_dir"],
             self.config[self.whos_turn]["type"] + "_file_for_" + reciever_type + ".nc",
         )
-        cdo_command = (
-            self.get_cdo_prefix()
-            + " mergetime "
-            + " ".join(files_to_combine)
-            + " "
-            + output_file
-        )
+        cdo_command = self.get_cdo_prefix() + " mergetime " + " ".join(files_to_combine) + " " + output_file
         click.secho("Combine files for sending to %s" % reciever_type, fg="cyan")
         click.secho(cdo_command, fg="cyan")
         subprocess.run(cdo_command, shell=True, check=True)
@@ -451,8 +428,7 @@ class Preprocess(Scope):
 class Regrid(Scope):
     def _calculate_weights(self, Model, Type, Interp):
         regrid_weight_file = os.path.join(
-            self.config["scope"]["couple_dir"],
-            "_".join([self.config[Model]["type"], Type, Interp, "weight_file.nc"]),
+            self.config["scope"]["couple_dir"], "_".join([self.config[Model]["type"], Type, Interp, "weight_file.nc"])
         )
 
         cdo_command = (
@@ -484,18 +460,10 @@ class Regrid(Scope):
         if self.config[self.whos_turn].get("recieve"):
             for sender_type in self.config[self.whos_turn].get("recieve"):
                 if self.config[self.whos_turn]["recieve"].get(sender_type):
-                    for Variable in self.config[self.whos_turn]["recieve"].get(
-                        sender_type
-                    ):
+                    for Variable in self.config[self.whos_turn]["recieve"].get(sender_type):
                         Model = self.whos_turn
                         Type = sender_type
-                        Interp = (
-                            self.config[self.whos_turn]
-                            .get("recieve")
-                            .get(sender_type)
-                            .get(Variable)
-                            .get("interp")
-                        )
+                        Interp = self.config[self.whos_turn].get("recieve").get(sender_type).get(Variable).get("interp")
                         self.regrid_one_var(Model, Type, Interp, Variable)
 
     def regrid_one_var(self, Model, Type, Interp, Variable):
