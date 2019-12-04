@@ -1,9 +1,7 @@
-Modules & Code Documentation
-============================
+scope
+=====
 
-This section shows source code documentation.
+.. toctree::
+   :maxdepth: 4
 
-.. automodule:: scope
-    :members:
-    :undoc-members:
-    :show-inheritance:
+   scope
