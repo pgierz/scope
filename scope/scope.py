@@ -29,6 +29,7 @@ The following classes are defined here:
   on the specifications in the ``scope_config.yaml``
 """
 
+from functools import wraps
 import logging
 import os
 import re
@@ -66,15 +67,16 @@ class Scope(object):
         """
         Base class for various Scope objects. Other classes should extend this one.
 
+        Some design features are listed below:
 
         ``pre`` and ``post`` hooks
         --------------------------
 
-        Any main method of a ``scope`` object has a hook to call a script with
-        specific arguments and flags before and after the main scope method
-        call. Best explained by an example. Assume your Scope subclass has a
-        method "preprocess". Here is the order the program will execute in,
-        given the following configuration:
+        Any appropriately decorated method of a ``scope`` object has a hook to
+        call a script with specific arguments and flags before and after the
+        main scope method call. Best explained by an example. Assume your Scope
+        subclass has a method "preprocess". Here is the order the program will
+        execute in, given the following configuration:
 
         .. code ::
 
@@ -107,7 +109,7 @@ class Scope(object):
 
 
         Parameters
-        ---------
+        ----------
         config : dict
             A dictionary (normally recieved from a YAML file) describing the
             ``scope`` configuration. An example dictionary is included in the root
@@ -160,26 +162,69 @@ class Scope(object):
         # PG: Why is it a classmethod? I don't understand this yet...
         @classmethod
         def pre_hook(cls, meth):
+            # Did you ask yourself -- What's wraps? See:
+            # https://www.thecodeship.com/patterns/guide-to-python-function-decorators/
+            @wraps(meth)
             def wrapped_meth(self, *args):
-                print("Before :", meth.__name__)
                 program_to_call = (
                     self.config[self.whos_turn]
                     .get("pre_" + meth.__name__, {})
                     .get("program")
                 )
-                arguments_for_program = None
-                subprocess.run(
-                    program_to_call + arguments_for_program, shell=True, check=True
+
+                flags_for_program = (
+                    self.config[self.whos_turn]
+                    .get("pre_" + meth.__name__, {})
+                    .get("flags_for_program")
                 )
+
+                arguments_for_program = (
+                    self.config[self.whos_turn]
+                    .get("pre_" + meth.__name__, {})
+                    .get("arguments_for_program")
+                )
+
+                full_process = program_to_call
+                if flags_for_program:
+                    full_process += flags_for_program
+                if arguments_for_program:
+                    full_process += arguments_for_program
+                subprocess.run(full_process, shell=True, check=True)
                 meth(self, *args)
 
             return wrapped_meth
 
+        # FIXME: I don't really like that this is exactly the same above with
+        # only a positional change. Probably it can abstracted away...
         @classmethod
         def post_hook(cls, meth):
+            @wraps(meth)
             def wrapped_meth(*args):
                 meth(*args)
-                print("After :", meth.__name__)
+                program_to_call = (
+                    self.config[self.whos_turn]
+                    .get("pre_" + meth.__name__, {})
+                    .get("program")
+                )
+
+                flags_for_program = (
+                    self.config[self.whos_turn]
+                    .get("pre_" + meth.__name__, {})
+                    .get("flags_for_program")
+                )
+
+                arguments_for_program = (
+                    self.config[self.whos_turn]
+                    .get("pre_" + meth.__name__, {})
+                    .get("arguments_for_program")
+                )
+
+                full_process = program_to_call
+                if flags_for_program:
+                    full_process += flags_for_program
+                if arguments_for_program:
+                    full_process += arguments_for_program
+                subprocess.run(full_process, shell=True, check=True)
 
             return wrapped_meth
 

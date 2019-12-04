@@ -12,7 +12,7 @@ echam:
     outdata_dir: "/work/ollie/pgierz/scope_tests/outdata/echam/"
     code table: "echam6"
     pre_preprocess:
-        program: "echo 'hello from pre_preprocess'"
+        program: "echo \"hello from pre_preprocess. Do you know: $(( 7 * 6 )) is the answer!\""
     send:
         ice:
             temp2:
