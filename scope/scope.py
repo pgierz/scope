@@ -66,6 +66,46 @@ class Scope(object):
         """
         Base class for various Scope objects. Other classes should extend this one.
 
+
+        ``pre`` and ``post`` hooks
+        --------------------------
+
+        Any main method of a ``scope`` object has a hook to call a script with
+        specific arguments and flags before and after the main scope method
+        call. Best explained by an example. Assume your Scope subclass has a
+        method "preprocess". Here is the order the program will execute in,
+        given the following configuration:
+
+        .. code ::
+
+            pre_preprocess:
+                program: /some/path/to/an/executable
+                args:
+                    - list
+                    - of
+                    - arguments
+                flags:
+                    - "--flag value1"
+                    - "--different_flag value2"
+
+            post_preprocess:
+                program: /some/other/path
+                args:
+                    - A
+                    - B
+                    - C
+                flags:
+                    - "--different_flag value3"
+
+        Given this configuration, an idealized system call would look like:
+
+        .. code ::
+
+            $ ./pre_preprocess['program'] list of arguments --flag value1 --different_flag value2
+            $ <... python call to preprocess method ...>
+            $ ./post_preprocess['program'] A B C --different_flag value 3
+
+
         Parameters
         ---------
         config : dict
@@ -75,6 +115,13 @@ class Scope(object):
         whos_turn : str
             An explicit model name telling you which model is currently
             interfacing with ``scope`` e.g. ``echam`` or ``pism``.
+
+        Warning
+        -------
+        This function has a filesystem side-effect: it generates the couple
+        folder defined in ``config["scope"]["couple_dir"]``. If you don't have
+        permissions to create this folder, the object initialization will
+        fail...
         """
         self.config = config
         self.whos_turn = whos_turn
@@ -109,8 +156,42 @@ class Scope(object):
         else:
             return "cdo"
 
+    class ScopeDecorators(object):
+        # PG: Why is it a classmethod? I don't understand this yet...
+        @classmethod
+        def pre_hook(cls, meth):
+            def wrapped_meth(self, *args):
+                print("Before :", meth.__name__)
+                program_to_call = (
+                    self.config[self.whos_turn]
+                    .get("pre_" + meth.__name__, {})
+                    .get("program")
+                )
+                arguments_for_program = None
+                subprocess.run(
+                    program_to_call + arguments_for_program, shell=True, check=True
+                )
+                meth(self, *args)
+
+            return wrapped_meth
+
+        @classmethod
+        def post_hook(cls, meth):
+            def wrapped_meth(*args):
+                meth(*args)
+                print("After :", meth.__name__)
+
+            return wrapped_meth
+
 
 class Preprocess(Scope):
+    """
+    Subclass of ``Scope`` which enables preprocessing of models via ``cdo``.
+    Use the ``preprocess`` method after building a ``Precprocess`` object.
+    """
+
+    @Scope.ScopeDecorators.pre_hook
+    @Scope.ScopeDecorators.post_hook
     def preprocess(self):
         for (sender_type, sender_args) in self._all_senders():
             for variable_name, variable_dict in sender_args.items():
@@ -128,7 +209,9 @@ class Preprocess(Scope):
 
         Example
         -------
-        Here is an example for the reciever specification dictionary:
+        Here is an example for the reciever specification dictionary. See the
+        documentation regarding ``scope`` configuration for further
+        information:
 
         .. code::
 

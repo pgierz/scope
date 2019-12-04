@@ -11,6 +11,8 @@ echam:
     griddes: T63
     outdata_dir: "/work/ollie/pgierz/scope_tests/outdata/echam/"
     code table: "echam6"
+    pre_preprocess:
+        program: "echo 'hello from pre_preprocess'"
     send:
         ice:
             temp2:
