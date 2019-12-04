@@ -1,0 +1,48 @@
+template_replacements:
+    EXP_ID: "PI_1x10"
+    DATE_PATTERN: "[0-9]{6}"
+
+scope:
+    couple_dir: "/work/ollie/pgierz/scope_tests/couple/"
+    number openMP processes: 8
+
+echam:
+    type: atmosphere
+    griddes: T63
+    outdata_dir: "/work/ollie/pgierz/scope_tests/outdata/echam/"
+    code table: "echam6"
+    send:
+        ice:
+            temp2:
+                files:
+                    pattern: "{{ EXP_ID }}_echam6_echam_{{ DATE_PATTERN }}.grb"
+                    take:
+                        newest: 12
+                code table: "echam6"
+            aprl:
+                files:
+                    dir: "/work/ollie/pgierz/scope_tests/outdata/echam/"
+                    pattern: "{{ EXP_ID }}_echam6_echam_{{ DATE_PATTERN }}.grb"
+                    take:
+                        newest: 12
+                code table: "/work/ollie/pgierz/scope_tests/outdata/echam/PI_1x10_185001.01_echam.codes"
+            aprc:
+                files:
+                    dir: "/work/ollie/pgierz/scope_tests/outdata/echam/"
+                    pattern: "{{ EXP_ID }}_echam6_echam_{{ DATE_PATTERN }}.grb"
+                    take:
+                        newest: 12
+
+pism:
+    type: ice
+    griddes: ice.griddes
+    recieve:
+        atmosphere:
+            temp2:
+                interp: bil
+                transformation:
+                    - expr: "air_temp=temp2-273.15"
+        ocean:
+    send:
+        atmosphere:
+        ocean:

@@ -87,5 +87,6 @@ def preprocess(config_path, whos_turn):
     preprocessor = Preprocess(config, whos_turn)
     preprocessor.preprocess()
 
+
 if __name__ == "__main__":
     sys.exit(main())  # pragma: no cover

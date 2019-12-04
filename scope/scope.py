@@ -1,6 +1,33 @@
 # -*- coding: utf-8 -*-
+"""
+Here, the ``scope`` library is described. This allows you to use specific parts
+of ``scope`` from other programs.
 
-"""Main module."""
+``scope`` consists of several main classes. Note that most of them provide
+Python access to ``cdo`` calls via Python's built-in ``subprocess`` module.
+Without a correctly installed ``cdo``, many of these functions/classes will not
+work.
+
+
+Here, we provide a quick summary, but please look at the documentation for each
+function and class for more complete information. The following functions are
+defined:
+
+* ``determine_cdo_openMP`` -- using ``cdo --version``, determines if you have
+  openMP support.
+
+The following classes are defined here:
+
+* ``Scope`` -- an abstract base class useful for starting other classes from.
+  This provides a way to determine if ``cdo`` has openMP support or not by
+  parsing ``cdo --version``.
+
+* ``Preprocess`` -- a class to extract and combine various NetCDF files for
+  further processing.
+
+* ``Regrid`` -- a class to easily regrid from one model to another, depending
+  on the specifications in the ``scope_config.yaml``
+"""
 
 import logging
 import os
@@ -14,6 +41,16 @@ def determine_cdo_openMP():
     """
     Checks if the ``cdo`` version being used supports ``OpenMP``; useful to
     check if you need a ``-P`` flag or not.
+
+    Parameters
+    ----------
+    None
+
+    Returns
+    -------
+    bool :
+        True if ``OpenMP`` is listed in the Features of ``cdo``, otherwise
+        False
     """
     cmd = "cdo --version"
     cdo_ver = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT)
@@ -26,6 +63,19 @@ def determine_cdo_openMP():
 
 class Scope(object):
     def __init__(self, config, whos_turn):
+        """
+        Base class for various Scope objects. Other classes should extend this one.
+
+        Parameters
+        ---------
+        config : dict
+            A dictionary (normally recieved from a YAML file) describing the
+            ``scope`` configuration. An example dictionary is included in the root
+            directory under ``examples/scope_config.yaml``
+        whos_turn : str
+            An explicit model name telling you which model is currently
+            interfacing with ``scope`` e.g. ``echam`` or ``pism``.
+        """
         self.config = config
         self.whos_turn = whos_turn
 
@@ -33,6 +83,25 @@ class Scope(object):
             os.makedirs(config["scope"]["couple_dir"])
 
     def get_cdo_prefix(self, has_openMP=None):
+        """
+        Return a string with an appropriate ``cdo`` prefix for using OpenMP
+        with the ``-P`` flag.
+
+        Parameters
+        ----------
+        has_openMP : bool
+            Default is ``None``. You can explicitly override the ability of
+            ``cdo`` to use the ``-P`` flag. If set to ``True``, the config must
+            have an entry under ``config[scope][number openMP processes]``
+            defining how many openMP processes to use (should be an int)
+
+        Returns
+        -------
+        str :
+            A string which should be used for the ``cdo`` call, either with or
+            without ``-P X``, where ``X`` is the number of openMP processes to
+            use.
+        """
         if not has_openMP:
             has_openMP = determine_cdo_openMP()
         if has_openMP:
@@ -50,12 +119,48 @@ class Preprocess(Scope):
             self._combine_tmp_variable_files(sender_type)
 
     def _all_senders(self):
+        """
+        A generator giving tuples of the *reciever_type* (e.g. ice, atmosphere,
+        ocean, solid earth), and the *configuration for the reciever type*,
+        including variables and corresponding specifications for which files to
+        use and how to process them.
+
+
+        Example
+        -------
+        Here is an example for the reciever specification dictionary:
+
+        .. code::
+
+            temp2:
+                files:
+                    pattern: "{{ EXP_ID }}_echam6_echam_{{ DATE_PATTERN }}.grb"
+                    take:
+                        newest: 12
+                code table: "echam6"
+            aprl:
+                files:
+                    dir: "/work/ollie/pgierz/scope_tests/outdata/echam/"
+                    pattern: "{{ EXP_ID }}_echam6_echam_{{ DATE_PATTERN }}.grb"
+                    take:
+                        newest: 12
+                code table: "/work/ollie/pgierz/scope_tests/outdata/echam/PI_1x10_185001.01_echam.codes"
+
+        Yields
+        ------
+        tuple of (str, dict)
+
+            The first element of the tuple, ``reciever_type``, is a string
+            describing what sort of model should get this data; e.g. "ice",
+            "atmosphere"
+
+            The second element, ``reciever_spec``, is a dictionary describing
+            which files should be used.
+        """
         if self.config[self.whos_turn].get("send"):
             for reciever_type in self.config[self.whos_turn].get("send"):
-                yield (
-                    reciever_type,
-                    self.config[self.whos_turn]["send"][reciever_type],
-                )
+                reciever_spec = self.config[self.whos_turn]["send"][reciever_type]
+                yield (reciever_type, reciever_spec)
 
     def _construct_filelist(self, var_dict):
         """
@@ -63,6 +168,7 @@ class Preprocess(Scope):
         Example
         -------
         The variable configuration dictionary can have the following top-level **keys**:
+
         * ``files`` may contain:
             * a ``filepattern`` in regex to look for
             * ``take`` which files to take, either specific, or
@@ -124,13 +230,13 @@ class Preprocess(Scope):
           which variables. If not given, the fallback value is the value of
           ``code table`` in the sender configuration.
 
+        Converts any input file to ``nc`` via `cdo`. Runs both ``select`` and
+        ``settable``.
+
         Returns
         -------
         None
 
-        Notes
-        -----
-        Converts any input file to ``nc`` via `cdo`. Runs both ``select`` and ``settable``.
         """
         flist = self._construct_filelist(var_dict)
         for f in flist:
@@ -181,8 +287,8 @@ class Preprocess(Scope):
         -------
         None
 
-        Note
-        ----
+        Notes
+        -----
         This executes a ``cdo mergetime`` command to concatenate all files found which
         should be sent to particular model.
         """
@@ -193,24 +299,25 @@ class Preprocess(Scope):
         variables_to_send_to_reciever = list(reciever)
         files_to_combine = []
         for f in os.listdir(self.config["scope"]["couple_dir"]):
-            fvar = f.replace(self.whos_turn+"_", "").replace("_file_for_scope.nc", "")
+            fvar = f.replace(self.whos_turn + "_", "").replace("_file_for_scope.nc", "")
             if fvar in variables_to_send_to_reciever:
-                files_to_combine.append(os.path.join(self.config["scope"]["couple_dir"], f))
+                files_to_combine.append(
+                    os.path.join(self.config["scope"]["couple_dir"], f)
+                )
         output_file = os.path.join(
-                self.config["scope"]["couple_dir"],
-                self.config[self.whos_turn]['type'] + "_file_for_" + reciever_type+".nc"
-                )
+            self.config["scope"]["couple_dir"],
+            self.config[self.whos_turn]["type"] + "_file_for_" + reciever_type + ".nc",
+        )
         cdo_command = (
-                self.get_cdo_prefix()
-                + " mergetime "
-                + " ".join(files_to_combine)
-                + " "
-                + output_file
-                )
+            self.get_cdo_prefix()
+            + " mergetime "
+            + " ".join(files_to_combine)
+            + " "
+            + output_file
+        )
         click.secho("Combine files for sending to %s" % reciever_type, fg="cyan")
         click.secho(cdo_command, fg="cyan")
         subprocess.run(cdo_command, shell=True, check=True)
-
 
 
 class Regrid(Scope):
