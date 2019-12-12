@@ -4,6 +4,6 @@
 
 __author__ = """Paul Gierz"""
 __email__ = "pgierz@awi.de"
-__version__ = "__version__ = '0.1.3'"
+__version__ = "__version__ = '0.1.4'"
 
 from .scope import *
