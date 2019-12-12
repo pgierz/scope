@@ -53,6 +53,9 @@ clean-test: ## remove test and coverage artifacts
 lint: ## check style with flake8
 	flake8 scope tests
 
+style: ## run black on scope
+	black -l 120 scope
+
 test: ## run tests quickly with the default Python
 	python setup.py test
 
