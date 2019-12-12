@@ -167,6 +167,25 @@ class Scope(object):
     class ScopeDecorators(object):
         """Contains decorators you can use on class methods"""
 
+        # FIXME: I don't really like that this is exactly the same above with
+        # only a positional change. Probably it can abstracted away...
+        @staticmethod
+        def _wrap_hook(self, meth):
+            program_to_call = self.config[self.whos_turn].get("pre_" + meth.__name__, {}).get("program")
+
+            flags_for_program = self.config[self.whos_turn].get("pre_" + meth.__name__, {}).get("flags_for_program")
+
+            arguments_for_program = (
+                self.config[self.whos_turn].get("pre_" + meth.__name__, {}).get("arguments_for_program")
+            )
+
+            full_process = program_to_call
+            if flags_for_program:
+                full_process += flags_for_program
+            if arguments_for_program:
+                full_process += arguments_for_program
+            subprocess.run(full_process, shell=True, check=True)
+
         # PG: Why is it a classmethod? I don't understand this yet...
         @classmethod
         def pre_hook(cls, meth):
@@ -179,45 +198,17 @@ class Scope(object):
             # https://www.thecodeship.com/patterns/guide-to-python-function-decorators/
             @wraps(meth)
             def wrapped_meth(self, *args):
-                program_to_call = self.config[self.whos_turn].get("pre_" + meth.__name__, {}).get("program")
-
-                flags_for_program = self.config[self.whos_turn].get("pre_" + meth.__name__, {}).get("flags_for_program")
-
-                arguments_for_program = (
-                    self.config[self.whos_turn].get("pre_" + meth.__name__, {}).get("arguments_for_program")
-                )
-
-                full_process = program_to_call
-                if flags_for_program:
-                    full_process += flags_for_program
-                if arguments_for_program:
-                    full_process += arguments_for_program
-                subprocess.run(full_process, shell=True, check=True)
+                self._wrap_hook(self, meth)
                 meth(self, *args)
 
             return wrapped_meth
 
-        # FIXME: I don't really like that this is exactly the same above with
-        # only a positional change. Probably it can abstracted away...
         @classmethod
         def post_hook(cls, meth):
             @wraps(meth)
-            def wrapped_meth(*args):
+            def wrapped_meth(self, *args):
                 meth(*args)
-                program_to_call = self.config[self.whos_turn].get("pre_" + meth.__name__, {}).get("program")
-
-                flags_for_program = self.config[self.whos_turn].get("pre_" + meth.__name__, {}).get("flags_for_program")
-
-                arguments_for_program = (
-                    self.config[self.whos_turn].get("pre_" + meth.__name__, {}).get("arguments_for_program")
-                )
-
-                full_process = program_to_call
-                if flags_for_program:
-                    full_process += flags_for_program
-                if arguments_for_program:
-                    full_process += arguments_for_program
-                subprocess.run(full_process, shell=True, check=True)
+                self._wrap_hook(self, meth)
 
             return wrapped_meth
 

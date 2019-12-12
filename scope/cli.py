@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 
 """Console script for scope."""
+
+import logging
 import sys
+
 import click
 import yaml
-
 import jinja2
 
 from scope import Regrid, Preprocess
@@ -43,12 +45,12 @@ def yaml_file_to_dict(filepath):
                 del parsed_dict["template_replacements"]
                 return parsed_dict
         except IOError as error:
-            logger.debug(
+            logging.debug(
                 "IOError (%s) File not found with %s, trying another extension pattern.",
                 error.errno,
                 filepath + extension,
             )
-    raise FileNotFoundError("All file extensions tried and none worked for %s" % filepath)
+    raise OSError("All file extensions tried and none worked for %s" % filepath)
 
 
 @click.group()
