@@ -23,7 +23,12 @@ Earth System. It is written in Python and configured with YAML files.
 Features
 --------
 
-* TODO
+* Automatic remapping between various grids via the ``SCRIP`` library
+* Ability to run other programs before and after each step
+* Configuration via yaml files
+* No modification of model source code necessary
+
+
 
 Credits
 -------

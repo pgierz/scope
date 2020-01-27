@@ -1,0 +1,42 @@
+template_replacements:
+    EXP_ID: "PI_1x10"
+    DATE_PATTERN: "[0-9]{6}"
+
+scope:
+    couple_dir: "/work/ollie/pgierz/scope_tests/couple/"
+    number openMP processes: 8
+
+pism:
+    type: ice
+    griddes: ice.griddes
+    recieve:
+        solid_earth:
+            some_variable_name:
+                interp: bil
+              some_other_variable_name:
+                interp: con
+                transformation:
+                  - expr: "dBdt=...."
+    send:
+        solid_earth:
+          thk:
+            files:
+              pattern: "{{ EXP_ID }}_"
+              take:
+                what: timesteps
+                newest: 1
+
+  vilma:
+    type: solid_earth
+    griddes: n128
+    recieve:
+      solid_earth:
+          thk:
+            interp: con
+    send:
+      ice:
+        rsl:
+          files: "{{ EXP_ID }}_vilma_{{ DATE_PATTERN }}.nc"
+          take:
+            what: timesteps
+            newest: 1

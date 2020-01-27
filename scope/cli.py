@@ -15,11 +15,20 @@ from scope import Regrid, Preprocess
 YAML_AUTO_EXTENSIONS = ["", ".yml", ".yaml", ".YML", ".YAML"]
 
 
-def yaml_file_to_dict(filepath):
+def yaml_file_to_dict(filepath: str) -> dict:
     """
-    Given a yaml file, returns a corresponding dictionary.
+    Given a scope configuration yaml file, returns a corresponding dictionary.
 
-    If you do not give an extension, tries again after appending one.
+    If you do not give an extension, tries again after appending one:
+
+    + ``.yml``
+    + ``.yaml``
+    + ``.YML``
+    + ``.YAML``
+
+    Note that this function also uses `~jinja2` to replace any templated
+    variables found in the under the top-level key ``template_replacements``.
+    This key is then deleted from the remainder of the dictionary.
 
     Parameters
     ----------
@@ -30,6 +39,10 @@ def yaml_file_to_dict(filepath):
     -------
     dict
         A dictionary representation of the yaml file.
+
+    Raises
+    ------
+    ``OSError`` if the file cannot be found.
     """
     for extension in YAML_AUTO_EXTENSIONS:
         try:
@@ -57,15 +70,18 @@ def yaml_file_to_dict(filepath):
 @click.version_option()
 def main(args=None):
     """Console script for scope."""
-    click.echo("Replace this message by putting your code into scope.cli.main")
-    click.echo("See click documentation at http://click.pocoo.org/")
+    click.echo(
+        "SCOPE a stand-alone coupler. Please use --help for available operations."
+    )
+    click.echo("See documentation at https://scope-coupler.readthedocs.io")
     return 0
 
 
 @main.command()
 @click.argument("config_path", type=click.Path(exists=True))
 @click.argument("whos_turn")
-def regrid(config_path, whos_turn):
+def regrid(config_path: str, whos_turn: str) -> None:
+    """Command line interface to regridding"""
     config = yaml_file_to_dict(config_path)
     regridder = Regrid(config, whos_turn)
     regridder.regrid()
@@ -74,7 +90,7 @@ def regrid(config_path, whos_turn):
 @main.command()
 @click.argument("config_path", type=click.Path(exists=True))
 @click.argument("whos_turn")
-def preprocess(config_path, whos_turn):
+def preprocess(config_path: str, whos_turn: str) -> None:
     config = yaml_file_to_dict(config_path)
 
     print(80 * "-")

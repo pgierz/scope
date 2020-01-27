@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+#!/usr/bin/env python3
 """
 Here, the ``scope`` library is described. This allows you to use specific parts
 of ``scope`` from other programs.
@@ -9,7 +9,7 @@ Without a correctly installed ``cdo``, many of these functions/classes will not
 work.
 
 
-Here, we provide a quick summary, but please look at the documentation for each
+We provide a quick summary, but please look at the documentation for each
 function and class for more complete information. The following functions are
 defined:
 
@@ -30,6 +30,8 @@ The following classes are defined here:
 
 * ``Regrid`` -- a class to easily regrid from one model to another, depending
   on the specifications in the ``scope_config.yaml``
+
+- - - - - -
 """
 
 from functools import wraps
@@ -41,7 +43,7 @@ import subprocess
 import click
 
 
-def determine_cdo_openMP():
+def determine_cdo_openMP() -> bool:
     """
     Checks if the ``cdo`` version being used supports ``OpenMP``; useful to
     check if you need a ``-P`` flag or not.
@@ -65,11 +67,81 @@ def determine_cdo_openMP():
     return False
 
 
-class Scope(object):
-    def __init__(self, config, whos_turn):
-        """
-        Base class for various Scope objects. Other classes should extend this one.
+def get_newest_n_timesteps(f: str, take: int) -> str:
+    """
+    Given a file, takes the newest n timesteps for further processing.
 
+    Parameters
+    ----------
+    f : str
+        The file to use.
+    take : int
+        Number of timesteps to take (newest will be taken, i.e. from the end of the file).
+
+    Returns
+    -------
+    str :
+        A string with the path to the new file
+    """
+    cdo_command = (
+        "cdo "
+        + " -f nc "
+        + " -seltimestep,"
+        + str(-take)
+        + "/-1 "
+        + f
+        + " "
+        + f.replace(".nc", "_newest_" + str(take) + "_timesteps.nc")
+    )
+    click.secho(
+        "Selecting newest %s timesteps for further processing " % str(take), fg="cyan"
+    )
+    click.secho(cdo_command, fg="cyan")
+    subprocess.run(cdo_command, shell=True, check=True)
+    return f.replace(".nc", "_newest_" + str(int) + "_timesteps.nc")
+
+
+def get_oldest_n_timesteps(f: str, take: int) -> str:
+    """
+    Given a file, takes the oldest n timesteps for further processing.
+
+    Parameters
+    ----------
+    f : str
+        The file to use.
+    take : int
+        Number of timesteps to take (newest will be taken, i.e. from the beginning of the file).
+
+    Returns
+    -------
+    str :
+        A string with the path to the new file
+    """
+    cdo_command = (
+        "cdo "
+        + " -f nc "
+        + " -seltimestep,1/"
+        + str(take)
+        + " "
+        + f
+        + " "
+        + f.replace(".nc", "_oldest_" + str(take) + "_timesteps.nc")
+    )
+    click.secho(
+        "Selecting oldest %s timesteps for further processing " % str(take), fg="cyan"
+    )
+    click.secho(cdo_command, fg="cyan")
+    subprocess.run(cdo_command, shell=True, check=True)
+    return f.replace(".nc", "_oldest_" + str(int) + "_timesteps.nc")
+
+
+class Scope:
+    """
+    Base class for various Scope objects. Other classes should extend this one.
+    """
+
+    def __init__(self, config: dict, whos_turn: str):
+        """
         Parameters
         ----------
         config : dict
@@ -86,6 +158,7 @@ class Scope(object):
         folder defined in ``config["scope"]["couple_dir"]``. If you don't have
         permissions to create this folder, the object initialization will
         fail...
+
 
         Some design features are listed below:
 
@@ -137,7 +210,7 @@ class Scope(object):
         if not os.path.isdir(config["scope"]["couple_dir"]):
             os.makedirs(config["scope"]["couple_dir"])
 
-    def get_cdo_prefix(self, has_openMP=None):
+    def get_cdo_prefix(self, has_openMP: bool = False):
         """
         Return a string with an appropriate ``cdo`` prefix for using OpenMP
         with the ``-P`` flag.
@@ -161,22 +234,30 @@ class Scope(object):
             has_openMP = determine_cdo_openMP()
         if has_openMP:
             return "cdo -P " + str(self.config["scope"]["number openMP processes"])
-        else:
-            return "cdo"
+        return "cdo"
 
-    class ScopeDecorators(object):
+    class ScopeDecorators:
         """Contains decorators you can use on class methods"""
 
-        # FIXME: I don't really like that this is exactly the same above with
-        # only a positional change. Probably it can abstracted away...
+        # FIXME: Why is this a static method?
         @staticmethod
         def _wrap_hook(self, meth):
-            program_to_call = self.config[self.whos_turn].get("pre_" + meth.__name__, {}).get("program")
+            program_to_call = (
+                self.config[self.whos_turn]
+                .get("pre_" + meth.__name__, {})
+                .get("program")
+            )
 
-            flags_for_program = self.config[self.whos_turn].get("pre_" + meth.__name__, {}).get("flags_for_program")
+            flags_for_program = (
+                self.config[self.whos_turn]
+                .get("pre_" + meth.__name__, {})
+                .get("flags_for_program")
+            )
 
             arguments_for_program = (
-                self.config[self.whos_turn].get("pre_" + meth.__name__, {}).get("arguments_for_program")
+                self.config[self.whos_turn]
+                .get("pre_" + meth.__name__, {})
+                .get("arguments_for_program")
             )
 
             full_process = program_to_call
@@ -222,9 +303,23 @@ class Preprocess(Scope):
     @Scope.ScopeDecorators.pre_hook
     @Scope.ScopeDecorators.post_hook
     def preprocess(self):
+        """
+        Selects and combines variables from various file into one single file for futher processing.
+
+        Files produced:
+        ---------------
+        * ``<sender_type>_file_for_<reciever_type>`` (e.g. ``atmosphere_file_for_ice.nc``)
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        None
+        """
         for (sender_type, sender_args) in self._all_senders():
             for variable_name, variable_dict in sender_args.items():
-                logging.debug("The following files will be used for:", variable_name)
                 self._make_tmp_files_for_variable(variable_name, variable_dict)
             self._combine_tmp_variable_files(sender_type)
 
@@ -276,6 +371,18 @@ class Preprocess(Scope):
 
     def _construct_filelist(self, var_dict):
         """
+        Constructs a file list to use for further processing based on user
+        specifications.
+
+        Parameters
+        ----------
+        var_dict : dict
+            Configuration dictionary for how to handle one specific variable.
+
+        Returns
+        -------
+        file_list
+            A list of files for further processing.
 
         Example
         -------
@@ -283,14 +390,16 @@ class Preprocess(Scope):
 
         * ``files`` may contain:
             * a ``filepattern`` in regex to look for
-            * ``take`` which files to take, either specific, or
+            * ``take`` which files or timesteps to take, either specific, or
               ``newest``/``latest`` followed by an integer.
             * ``dir`` a directory where to look for the files. Note that if
               this is not provided, the default is to fall back to the top level
               ``outdata_dir`` for the currently sending model.
         """
         r = re.compile(var_dict["files"]["pattern"])
-        file_directory = var_dict["files"].get("dir", self.config[self.whos_turn].get("outdata_dir"))
+        file_directory = var_dict["files"].get(
+            "dir", self.config[self.whos_turn].get("outdata_dir")
+        )
 
         all_files = []
         for rootname, _, filenames in os.walk(file_directory):
@@ -302,17 +411,37 @@ class Preprocess(Scope):
         # Just the matching files:
         matching_files = sorted([f for f in all_files if r.match(os.path.basename(f))])
         if "take" in var_dict["files"]:
-            if "newest" in var_dict["files"]["take"]:
-                take = var_dict["files"]["take"]["newest"]
-                return matching_files[-take:]
-            elif "oldest" in var_dict["files"]["take"]:
-                take = var_dict["files"]["take"]["oldest"]
-                return matching_files[:take]
-            # FIXME: This is wrong:
-            elif "specific" in var_dict["files"]["take"]:
-                return var_dict["files"]["take"]["specific"]
-        else:
-            return matching_files
+            if var_dict["take"].get("what") == "files":
+                if "newest" in var_dict["files"]["take"]:
+                    take = var_dict["files"]["take"]["newest"]
+                    return matching_files[-take:]
+                if "oldest" in var_dict["files"]["take"]:
+                    take = var_dict["files"]["take"]["oldest"]
+                    return matching_files[:take]
+                # FIXME: This is wrong:
+                if "specific" in var_dict["files"]["take"]:
+                    return var_dict["files"]["take"]["specific"]
+                raise SyntaxError("You must specify newest, oldest, or specific!")
+            if var_dict["take"].get("what") == "timesteps":
+                if "newest" in var_dict["files"]["take"]:
+                    take = var_dict["files"]["take"]["newest"]
+                    return get_newest_n_timesteps(matching_files[-1], take)
+                if "oldest" in var_dict["files"]["take"]:
+                    take = var_dict["files"]["take"]["oldest"]
+                    return get_oldest_n_timesteps(maching_files[-1], take)
+                if "specific" in var_dict["files"]["take"]:
+                    # return get_specific_timesteps[matching_files[-1], take]
+                    raise NotImplementedError(
+                        "Get specific timesteps not yet implemented!"
+                    )
+                raise SyntaxError("You must specify newest, oldest, or specific!")
+            raise SyntaxError(
+                """
+                You specified take in YAML, but didn't specify what to take.
+                Please either use 'timesteps' or 'files'
+                """
+            )
+        return matching_files
 
     def _make_tmp_files_for_variable(self, varname, var_dict):
         """
@@ -349,9 +478,12 @@ class Preprocess(Scope):
 
         """
         flist = self._construct_filelist(var_dict)
+        logging.debug("The following files will be used for: %s", varname)
         for f in flist:
-            print("- ", f)
-        code_table = var_dict.get("code table", self.config[self.whos_turn].get("code table"))
+            logging.debug("- %s", f)
+        code_table = var_dict.get(
+            "code table", self.config[self.whos_turn].get("code table")
+        )
         cdo_command = (
             self.get_cdo_prefix()
             + " -f nc -t "
@@ -369,7 +501,9 @@ class Preprocess(Scope):
             + "_file_for_scope.nc"
         )
 
-        click.secho("Selecting %s for further processing with SCOPE..." % varname, fg="cyan")
+        click.secho(
+            "Selecting %s for further processing with SCOPE..." % varname, fg="cyan"
+        )
         click.secho(cdo_command, fg="cyan")
         subprocess.run(cdo_command, shell=True, check=True)
 
@@ -398,19 +532,29 @@ class Preprocess(Scope):
         This executes a ``cdo mergetime`` command to concatenate all files found which
         should be sent to particular model.
         """
-        print(reciever_type)
-        reciever = self.config.get(self.whos_turn, {}).get("send", {}).get(reciever_type, {})
+        logging.debug(reciever_type)
+        reciever = (
+            self.config.get(self.whos_turn, {}).get("send", {}).get(reciever_type, {})
+        )
         variables_to_send_to_reciever = list(reciever)
         files_to_combine = []
         for f in os.listdir(self.config["scope"]["couple_dir"]):
             fvar = f.replace(self.whos_turn + "_", "").replace("_file_for_scope.nc", "")
             if fvar in variables_to_send_to_reciever:
-                files_to_combine.append(os.path.join(self.config["scope"]["couple_dir"], f))
+                files_to_combine.append(
+                    os.path.join(self.config["scope"]["couple_dir"], f)
+                )
         output_file = os.path.join(
             self.config["scope"]["couple_dir"],
             self.config[self.whos_turn]["type"] + "_file_for_" + reciever_type + ".nc",
         )
-        cdo_command = self.get_cdo_prefix() + " mergetime " + " ".join(files_to_combine) + " " + output_file
+        cdo_command = (
+            self.get_cdo_prefix()
+            + " mergetime "
+            + " ".join(files_to_combine)
+            + " "
+            + output_file
+        )
         click.secho("Combine files for sending to %s" % reciever_type, fg="cyan")
         click.secho(cdo_command, fg="cyan")
         subprocess.run(cdo_command, shell=True, check=True)
@@ -419,7 +563,8 @@ class Preprocess(Scope):
 class Regrid(Scope):
     def _calculate_weights(self, Model, Type, Interp):
         regrid_weight_file = os.path.join(
-            self.config["scope"]["couple_dir"], "_".join([self.config[Model]["type"], Type, Interp, "weight_file.nc"])
+            self.config["scope"]["couple_dir"],
+            "_".join([self.config[Model]["type"], Type, Interp, "weight_file.nc"]),
         )
 
         cdo_command = (
@@ -451,10 +596,18 @@ class Regrid(Scope):
         if self.config[self.whos_turn].get("recieve"):
             for sender_type in self.config[self.whos_turn].get("recieve"):
                 if self.config[self.whos_turn]["recieve"].get(sender_type):
-                    for Variable in self.config[self.whos_turn]["recieve"].get(sender_type):
+                    for Variable in self.config[self.whos_turn]["recieve"].get(
+                        sender_type
+                    ):
                         Model = self.whos_turn
                         Type = sender_type
-                        Interp = self.config[self.whos_turn].get("recieve").get(sender_type).get(Variable).get("interp")
+                        Interp = (
+                            self.config[self.whos_turn]
+                            .get("recieve")
+                            .get(sender_type)
+                            .get(Variable)
+                            .get("interp")
+                        )
                         self.regrid_one_var(Model, Type, Interp, Variable)
 
     def regrid_one_var(self, Model, Type, Interp, Variable):
@@ -485,3 +638,7 @@ class Regrid(Scope):
         click.secho("Remapping: ", fg="cyan")
         click.secho(cdo_command, fg="cyan")
         subprocess.run(cdo_command, shell=True, check=True)
+
+
+# -*- coding: utf-8 -*-
+# -*- last line -*-
