@@ -17,6 +17,13 @@ pism:
                 interp: con
                 transformation:
                   - expr: "dBdt=...."
+                scripts:
+                  - script1
+                  - script1_args:
+
+                  -script1_flags:
+                    infile: fjdsflksa
+                    outfile: jfkls
     send:
         solid_earth:
           thk:

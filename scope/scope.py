@@ -1,3 +1,11 @@
+# @Author: Paul Gierz <pgierz>
+# @Date:   2019-12-05T07:26:48+01:00
+# @Email:  pgierz@awi.de
+# @Filename: scope.py
+# @Last modified by:   pgierz
+# @Last modified time: 2020-02-27T16:38:38+01:00
+
+
 #!/usr/bin/env python3
 """
 Here, the ``scope`` library is described. This allows you to use specific parts
@@ -484,10 +492,12 @@ class Preprocess(Scope):
         code_table = var_dict.get(
             "code table", self.config[self.whos_turn].get("code table")
         )
+        code_table_command = f"-t {code_table}" if code_table else ""
         cdo_command = (
             self.get_cdo_prefix()
-            + " -f nc -t "
-            + code_table
+            + " -f nc "
+            + " "
+            + code_table_command
             + " -select,name="
             + varname
             + " "
