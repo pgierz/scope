@@ -134,6 +134,33 @@ Command line interface
 This will print usage information.
 
 
+Any ``scope`` commands you normally would run in a batch job can also be
+individually targeted via command line arguments. In principle, the command
+structure is always the same, namely::
+
+    $ scope <command> ${CONFIG} ${WHOS_TURN}
+
+This allows you to run one specific part of ``scope`` for a particular
+configuration assuming a particular model is currently doing something. As an
+example, this could take the form of::
+
+    $ scope preprocess ~/Code/scope/examples/scope_config.yaml echam
+
+This would cause ``scope`` to run the prepare steps described for ``echam``; in
+this particular case gathering output files, extracting variables, and placing
+the resulting file into the couple folder described in the configuration file.
+Note that also and pre- and post-processing hooks defined in the configuration
+file will also be run at this point.
+
+All available commands are printed via ``scope --help``.
+
+Currently, the following commands are implemented:
+
+* ``preprocess``
+* ``regrid``
+
+
+
 Python Library Usage
 --------------------
 
