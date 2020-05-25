@@ -173,5 +173,4 @@ To use scope in a project::
 
     import scope
 
-...good luck from this point forward. Paul still needs to write docs. Consider
-having a look at the developer API.
+Consider having a look at the developer API for more detailed usage.
