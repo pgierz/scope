@@ -1,11 +1,3 @@
-# @Author: Paul Gierz <pgierz>
-# @Date:   2019-12-05T07:26:48+01:00
-# @Email:  pgierz@awi.de
-# @Filename: scope.py
-# @Last modified by:   pgierz
-# @Last modified time: 2020-02-27T16:38:38+01:00
-
-
 #!/usr/bin/env python3
 """
 Here, the ``scope`` library is described. This allows you to use specific parts
@@ -43,12 +35,16 @@ The following classes are defined here:
 """
 
 from functools import wraps
+import pprint
 import logging
 import os
 import re
 import subprocess
+import warnings
 
 import click
+
+# logging.basicConfig(level=logging.DEBUG)
 
 
 def determine_cdo_openMP() -> bool:
@@ -84,13 +80,16 @@ def get_newest_n_timesteps(f: str, take: int) -> str:
     f : str
         The file to use.
     take : int
-        Number of timesteps to take (newest will be taken, i.e. from the end of the file).
+        Number of timesteps to take (newest will be taken, i.e. from the end of
+        the file). Please use a positive value!
 
     Returns
     -------
     str :
         A string with the path to the new file
     """
+    if not take > 0:
+        raise ValueError("Please supply a positive integer as the ``take`` argument!")
     cdo_command = (
         "cdo "
         + " -f nc "
@@ -118,7 +117,7 @@ def get_oldest_n_timesteps(f: str, take: int) -> str:
     f : str
         The file to use.
     take : int
-        Number of timesteps to take (newest will be taken, i.e. from the beginning of the file).
+        Number of timesteps to take (oldest will be taken, i.e. from the beginning of the file).
 
     Returns
     -------
@@ -215,8 +214,13 @@ class Scope:
         self.config = config
         self.whos_turn = whos_turn
 
-        if not os.path.isdir(config["scope"]["couple_dir"]):
-            os.makedirs(config["scope"]["couple_dir"])
+        try:
+            if not os.path.isdir(config["scope"]["couple_dir"]):
+                os.makedirs(config["scope"]["couple_dir"])
+        except IOError:
+            warnings.warn(
+                f"Couldn't generate {config['scope']['couple_dir']} folder, this may cause downstream errors..."
+            )
 
     def get_cdo_prefix(self, has_openMP: bool = False):
         """
@@ -226,7 +230,7 @@ class Scope:
         Parameters
         ----------
         has_openMP : bool
-            Default is ``None``. You can explicitly override the ability of
+            Default is ``False``. You can explicitly override the ability of
             ``cdo`` to use the ``-P`` flag. If set to ``True``, the config must
             have an entry under ``config[scope][number openMP processes]``
             defining how many openMP processes to use (should be an int)
@@ -247,24 +251,26 @@ class Scope:
     class ScopeDecorators:
         """Contains decorators you can use on class methods"""
 
-        # FIXME: Why is this a static method?
+        # NOTE(PG): This is a "static method" which takes self as the first
+        # argument. That "self" actually referes to the self of the object
+        # method which is wrapped, not the "self" of this class.
         @staticmethod
-        def _wrap_hook(self, meth):
+        def _wrap_hook(self, meth, pre_or_post):
             program_to_call = (
                 self.config[self.whos_turn]
-                .get("pre_" + meth.__name__, {})
+                .get(f"{pre_or_post}_" + meth.__name__, {})
                 .get("program")
             )
 
             flags_for_program = (
                 self.config[self.whos_turn]
-                .get("pre_" + meth.__name__, {})
+                .get(f"{pre_or_post}_" + meth.__name__, {})
                 .get("flags_for_program")
             )
 
             arguments_for_program = (
                 self.config[self.whos_turn]
-                .get("pre_" + meth.__name__, {})
+                .get(f"{pre_or_post}_" + meth.__name__, {})
                 .get("arguments_for_program")
             )
 
@@ -278,7 +284,7 @@ class Scope:
         # PG: Why is it a classmethod? I don't understand this yet...
         @classmethod
         def pre_hook(cls, meth):
-            """ Based upon the ``self.config``, runs a specific system command
+            """Based upon the ``self.config``, runs a specific system command
 
             Using the method name, you can define
 
@@ -287,7 +293,7 @@ class Scope:
             # https://www.thecodeship.com/patterns/guide-to-python-function-decorators/
             @wraps(meth)
             def wrapped_meth(self, *args):
-                self._wrap_hook(self, meth)
+                self.ScopeDecorators._wrap_hook(self, meth, "pre")
                 meth(self, *args)
 
             return wrapped_meth
@@ -296,8 +302,8 @@ class Scope:
         def post_hook(cls, meth):
             @wraps(meth)
             def wrapped_meth(self, *args):
-                meth(*args)
-                self._wrap_hook(self, meth)
+                meth(self, *args)
+                self.ScopeDecorators._wrap_hook(self, meth, "post")
 
             return wrapped_meth
 
@@ -329,6 +335,8 @@ class Preprocess(Scope):
         for (sender_type, sender_args) in self._all_senders():
             for variable_name, variable_dict in sender_args.items():
                 self._make_tmp_files_for_variable(variable_name, variable_dict)
+                self._run_cdo_for_variable(variable_name, variable_dict)
+                self._rename_send_as_variables(variable_name, variable_dict)
             self._combine_tmp_variable_files(sender_type)
 
     def _all_senders(self):
@@ -408,41 +416,51 @@ class Preprocess(Scope):
         file_directory = var_dict["files"].get(
             "dir", self.config[self.whos_turn].get("outdata_dir")
         )
-
+        logging.debug(f"file pattern = {var_dict['files']['pattern']}")
+        logging.debug(f"regex = {r}")
+        logging.debug(f"file_directory = {file_directory}")
         all_files = []
         for rootname, _, filenames in os.walk(file_directory):
             for filename in filenames:
                 full_name = os.path.join(rootname, filename)
                 all_files.append(full_name)
             break  # Do not go into subdirectories
+        all_files = sorted(all_files)
+        logging.debug("All files:")
+        for f in all_files:
+            logging.debug(f"* {f}")
 
         # Just the matching files:
         matching_files = sorted([f for f in all_files if r.match(os.path.basename(f))])
+        logging.debug("Matching files:")
+        for f in matching_files:
+            logging.debug(f"* {f}")
         if "take" in var_dict["files"]:
-            if var_dict["take"].get("what") == "files":
+            if var_dict["files"]["take"].get("what") == "files":
                 if "newest" in var_dict["files"]["take"]:
-                    take = var_dict["files"]["take"]["newest"]
+                    take = int(var_dict["files"]["take"]["newest"])
                     return matching_files[-take:]
                 if "oldest" in var_dict["files"]["take"]:
-                    take = var_dict["files"]["take"]["oldest"]
+                    take = int(var_dict["files"]["take"]["oldest"])
                     return matching_files[:take]
                 # FIXME: This is wrong:
                 if "specific" in var_dict["files"]["take"]:
                     return var_dict["files"]["take"]["specific"]
                 raise SyntaxError("You must specify newest, oldest, or specific!")
-            if var_dict["take"].get("what") == "timesteps":
+            if var_dict["files"]["take"].get("what") == "timesteps":
                 if "newest" in var_dict["files"]["take"]:
-                    take = var_dict["files"]["take"]["newest"]
+                    take = int(var_dict["files"]["take"]["newest"])
                     return get_newest_n_timesteps(matching_files[-1], take)
                 if "oldest" in var_dict["files"]["take"]:
-                    take = var_dict["files"]["take"]["oldest"]
-                    return get_oldest_n_timesteps(maching_files[-1], take)
+                    take = int(var_dict["files"]["take"]["oldest"])
+                    return get_oldest_n_timesteps(matching_files[-1], take)
                 if "specific" in var_dict["files"]["take"]:
                     # return get_specific_timesteps[matching_files[-1], take]
                     raise NotImplementedError(
                         "Get specific timesteps not yet implemented!"
                     )
                 raise SyntaxError("You must specify newest, oldest, or specific!")
+            pprint.pprint(var_dict)
             raise SyntaxError(
                 """
                 You specified take in YAML, but didn't specify what to take.
@@ -517,6 +535,97 @@ class Preprocess(Scope):
         click.secho(cdo_command, fg="cyan")
         subprocess.run(cdo_command, shell=True, check=True)
 
+    def _run_cdo_for_variable(self, variable_name, variable_dict):
+        if "cdo" in variable_dict:
+            cdo_commands = variable_dict["cdo"]
+            try:
+                assert isinstance(cdo_commands, list)
+            except AssertionError:
+                print("ERROR -- you need to have all cdo commands as a list!")
+                sys.exit(1)
+            original_input = (
+                self.config["scope"]["couple_dir"]
+                + "/"
+                + self.whos_turn
+                + "_"
+                + variable_name
+                + "_file_for_scope.nc"
+            )
+            for tmp_file_counter, cdo_command in enumerate(cdo_commands):
+                output_file = (
+                    self.config["scope"]["couple_dir"]
+                    + "/"
+                    + self.whos_turn
+                    + "_"
+                    + variable_name
+                    + "_cdo_transform_"
+                    + str(tmp_file_counter)
+                    + ".nc"
+                )
+                if tmp_file_counter == 0:
+                    input_file = original_input
+                else:
+                    input_file = (
+                        self.config["scope"]["couple_dir"]
+                        + "/"
+                        + self.whos_turn
+                        + "_"
+                        + variable_name
+                        + "_cdo_transform_"
+                        + str(tmp_file_counter - 1)
+                        + ".nc"
+                    )
+                cdo_command = (
+                    self.get_cdo_prefix()
+                    + " -f nc "
+                    + " "
+                    + cdo_command
+                    + " "
+                    + input_file
+                    + " "
+                    + output_file
+                )
+                click.secho(cdo_command, fg="cyan")
+                subprocess.run(cdo_command, shell=True, check=True)
+            click.secho(
+                f"Moving last fine {output_file} back to {original_input}", fg="cyan"
+            )
+            os.rename(output_file, original_input)
+
+    def _rename_send_as_variables(self, variable_name, variable_dict):
+        if "send_as" in variable_dict:
+            send_as = variable_dict["send_as"]
+            fin = (
+                self.config["scope"]["couple_dir"]
+                + "/"
+                + self.whos_turn
+                + "_"
+                + variable_name
+                + "_file_for_scope.nc"
+            )
+            fout = (
+                self.config["scope"]["couple_dir"]
+                + "/"
+                + self.whos_turn
+                + "_"
+                + variable_name
+                + "_file_for_scope_send_as_"
+                + send_as
+                + ".nc"
+            )
+            cdo_command = (
+                self.get_cdo_prefix()
+                + " -f nc "
+                + " "
+                + f"chname,{variable_name},{send_as} {fin} {fout}"
+            )
+            click.secho(cdo_command, fg="cyan")
+            subprocess.run(cdo_command, shell=True, check=True)
+            click.secho(
+                f"Moving renamed variable in file {fout} back to {fin}", fg="cyan"
+            )
+            os.rename(fout, fin)
+
     # TODO/FIXME: This function does not work correctly if there are different
     # time axis for each variable. It might be better to just leave each
     # variable in it's own file.
@@ -539,7 +648,7 @@ class Preprocess(Scope):
 
         Notes
         -----
-        This executes a ``cdo mergetime`` command to concatenate all files found which
+        This executes a ``cdo merge`` command to concatenate all files found which
         should be sent to particular model.
         """
         logging.debug(reciever_type)
@@ -560,11 +669,12 @@ class Preprocess(Scope):
         )
         cdo_command = (
             self.get_cdo_prefix()
-            + " mergetime "
+            + " merge "
             + " ".join(files_to_combine)
             + " "
             + output_file
         )
+        # TODO: Add expressions
         click.secho("Combine files for sending to %s" % reciever_type, fg="cyan")
         click.secho(cdo_command, fg="cyan")
         subprocess.run(cdo_command, shell=True, check=True)

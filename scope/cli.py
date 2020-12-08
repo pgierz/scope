@@ -54,7 +54,7 @@ def yaml_file_to_dict(filepath: str) -> dict:
                 preparsed_dict = yaml.load(yaml_contents, Loader=yaml.FullLoader)
                 #
                 outputText = template.render(**preparsed_dict["template_replacements"])
-                parsed_dict = yaml.load(outputText)
+                parsed_dict = yaml.load(outputText, Loader=yaml.FullLoader)
                 del parsed_dict["template_replacements"]
                 return parsed_dict
         except IOError as error:
@@ -73,7 +73,6 @@ def main(args=None):
     click.echo(
         "SCOPE a stand-alone coupler. Please use --help for available operations."
     )
-    click.echo("See documentation at https://scope-coupler.readthedocs.io")
     return 0
 
 
@@ -101,6 +100,9 @@ def preprocess(config_path: str, whos_turn: str) -> None:
     print(80 * "-")
 
     preprocessor = Preprocess(config, whos_turn)
+    import pdb
+
+    pdb.set_trace()
     preprocessor.preprocess()
 
 
