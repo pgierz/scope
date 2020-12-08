@@ -91,18 +91,7 @@ def regrid(config_path: str, whos_turn: str) -> None:
 @click.argument("whos_turn")
 def preprocess(config_path: str, whos_turn: str) -> None:
     config = yaml_file_to_dict(config_path)
-
-    print(80 * "-")
-    import pprint
-
-    pp = pprint.PrettyPrinter(indent=4)
-    pp.pprint(config)
-    print(80 * "-")
-
     preprocessor = Preprocess(config, whos_turn)
-    import pdb
-
-    pdb.set_trace()
     preprocessor.preprocess()
 
 
