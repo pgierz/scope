@@ -11,7 +11,7 @@ with open("README.rst") as readme_file:
 with open("HISTORY.rst") as history_file:
     history = history_file.read()
 
-requirements = ["Click>=6.0", "pyyaml", "jinja2"]
+requirements = ["Click>=6.0", "pyyaml", "jinja2", "loguru"]
 
 setup_requirements = []
 
@@ -25,11 +25,10 @@ setup(
         "Intended Audience :: Developers",
         "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
         "Natural Language :: English",
-        "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.4",
-        "Programming Language :: Python :: 3.5",
         "Programming Language :: Python :: 3.6",
         "Programming Language :: Python :: 3.7",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
     ],
     description="Scope is an offline, script based coupler for Earth System Models",
     entry_points={

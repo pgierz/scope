@@ -9,7 +9,7 @@ import click
 import yaml
 import jinja2
 
-from scope import Regrid, Preprocess
+from scope import Recieve, Send
 
 
 YAML_AUTO_EXTENSIONS = ["", ".yml", ".yaml", ".YML", ".YAML"]
@@ -79,20 +79,20 @@ def main(args=None):
 @main.command()
 @click.argument("config_path", type=click.Path(exists=True))
 @click.argument("whos_turn")
-def regrid(config_path: str, whos_turn: str) -> None:
+def recieve(config_path: str, whos_turn: str) -> None:
     """Command line interface to regridding"""
     config = yaml_file_to_dict(config_path)
-    regridder = Regrid(config, whos_turn)
-    regridder.regrid()
+    reciever = Recieve(config, whos_turn)
+    reciever.recieve()
 
 
 @main.command()
 @click.argument("config_path", type=click.Path(exists=True))
 @click.argument("whos_turn")
-def preprocess(config_path: str, whos_turn: str) -> None:
+def send(config_path: str, whos_turn: str) -> None:
     config = yaml_file_to_dict(config_path)
-    preprocessor = Preprocess(config, whos_turn)
-    preprocessor.preprocess()
+    sender = Send(config, whos_turn)
+    sender.send()
 
 
 if __name__ == "__main__":

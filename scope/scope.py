@@ -25,24 +25,25 @@ The following classes are defined here:
   before and after the method is executed, which can be configured via the
   ``Scope.config`` dictionary.
 
-* ``Preprocess`` -- a class to extract and combine various NetCDF files for
+* ``Send`` -- a class to extract and combine various NetCDF files for
   further processing.
 
-* ``Regrid`` -- a class to easily regrid from one model to another, depending
+* ``Recieve`` -- a class to easily regrid from one model to another, depending
   on the specifications in the ``scope_config.yaml``
 
 - - - - - -
 """
 
 from functools import wraps
-import pprint
-import logging
 import os
+import pathlib
 import re
 import subprocess
+import sys
 import warnings
 
 import click
+from loguru import logger
 
 # logging.basicConfig(level=logging.DEBUG)
 
@@ -69,6 +70,35 @@ def determine_cdo_openMP() -> bool:
         if line.startswith("Features"):
             return "OpenMP" in line
     return False
+
+
+def determine_fileextension(f: str) -> str:
+    result = (
+        subprocess.check_output(f"cdo -s --no_warnings showformat {f}", shell=True)
+        .decode("utf-8")
+        .strip()
+    )
+    return result
+
+
+def suggest_fileext(f: str) -> str:
+    """
+    Given a file, uses CDO to determine which file extension is should have,
+    and gives back an appropriate string that can be used for renaming.
+    """
+    result = determine_fileextension(f)
+    current_extension = pathlib.Path(f).suffix
+    suggested_f = f.replace(current_extension, "." + result.lower())
+    logger.debug(f"{f} is actually a {result} file")
+    logger.debug(f"It could be renamed {suggested_f}")
+    return suggested_f
+
+
+def rename_with_suggested_fileext(f: str) -> None:
+    """Renames a file with the suggested file extension"""
+    new_f = suggest_fileext(f)
+    os.rename(f, new_f)
+    return new_f
 
 
 def get_newest_n_timesteps(f: str, take: int) -> str:
@@ -175,12 +205,12 @@ class Scope:
         Any appropriately decorated method of a ``scope`` object has a hook to
         call a script with specific arguments and flags before and after the
         main scope method call. Best explained by an example. Assume your Scope
-        subclass has a method "preprocess". Here is the order the program will
+        subclass has a method "send". Here is the order the program will
         execute in, given the following configuration:
 
         .. code :: yaml
 
-            pre_preprocess:
+            pre_send:
                 program: /some/path/to/an/executable
                 args:
                     - list
@@ -190,7 +220,7 @@ class Scope:
                     - "--flag value1"
                     - "--different_flag value2"
 
-            post_preprocess:
+            post_send:
                 program: /some/other/path
                 args:
                     - A
@@ -206,9 +236,9 @@ class Scope:
 
         .. code :: shell
 
-            $ ./pre_preprocess['program'] list of arguments --flag value1 --different_flag value2
-            $ <... python call to preprocess method ...>
-            $ ./post_preprocess['program'] A B C --different_flag value 3
+            $ ./pre_send['program'] list of arguments --flag value1 --different_flag value2
+            $ <... python call to send method ...>
+            $ ./post_send['program'] A B C --different_flag value 3
 
         """
         self.config = config
@@ -274,12 +304,13 @@ class Scope:
                 .get("arguments_for_program")
             )
 
-            full_process = program_to_call
-            if flags_for_program:
-                full_process += flags_for_program
-            if arguments_for_program:
-                full_process += arguments_for_program
-            subprocess.run(full_process, shell=True, check=True)
+            if program_to_call:
+                full_process = program_to_call
+                if flags_for_program:
+                    full_process += flags_for_program
+                if arguments_for_program:
+                    full_process += arguments_for_program
+                subprocess.run(full_process, shell=True, check=True)
 
         # PG: Why is it a classmethod? I don't understand this yet...
         @classmethod
@@ -308,15 +339,15 @@ class Scope:
             return wrapped_meth
 
 
-class Preprocess(Scope):
+class Send(Scope):
     """
-    Subclass of ``Scope`` which enables preprocessing of models via ``cdo``.
-    Use the ``preprocess`` method after building a ``Precprocess`` object.
+    Subclass of ``Scope`` which enables sending of models via ``cdo``.
+    Use the ``send`` method after building a ``Precprocess`` object.
     """
 
     @Scope.ScopeDecorators.pre_hook
     @Scope.ScopeDecorators.post_hook
-    def preprocess(self):
+    def send(self):
         """
         Selects and combines variables from various file into one single file for futher processing.
 
@@ -333,11 +364,26 @@ class Preprocess(Scope):
         None
         """
         for (sender_type, sender_args) in self._all_senders():
+            self.sending_to = sender_type
+            # Better handling of files during the loop
+            self.combine_list = []
             for variable_name, variable_dict in sender_args.items():
+                # Maybe never needed:
+                self.current_var_name = variable_name
+                self.current_var_dict = variable_dict
+                # Insert the first temporary file before transforms at the end
+                # of list:
                 self._make_tmp_files_for_variable(variable_name, variable_dict)
+                # Run CDO commands:
                 self._run_cdo_for_variable(variable_name, variable_dict)
+                # Possibly rename variables via send_as:
                 self._rename_send_as_variables(variable_name, variable_dict)
-            self._combine_tmp_variable_files(sender_type)
+            logger.debug(
+                f"Finished {sender_type} extraction, will combine these files:"
+            )
+            for f in self.combine_list:
+                logger.debug(f"* {f}")
+            self._combine_tmp_variable_files(sender_type, self.combine_list)
 
     def _all_senders(self):
         """
@@ -360,14 +406,14 @@ class Preprocess(Scope):
                     pattern: "{{ EXP_ID }}_echam6_echam_{{ DATE_PATTERN }}.grb"
                     take:
                         newest: 12
-                code table: "echam6"
+                code_table: "echam6"
             aprl:
                 files:
                     dir: "/work/ollie/pgierz/scope_tests/outdata/echam/"
                     pattern: "{{ EXP_ID }}_echam6_echam_{{ DATE_PATTERN }}.grb"
                     take:
                         newest: 12
-                code table: "/work/ollie/pgierz/scope_tests/outdata/echam/PI_1x10_185001.01_echam.codes"
+                code_table: "/work/ollie/pgierz/scope_tests/outdata/echam/PI_1x10_185001.01_echam.codes"
 
         Yields
         ------
@@ -416,9 +462,9 @@ class Preprocess(Scope):
         file_directory = var_dict["files"].get(
             "dir", self.config[self.whos_turn].get("outdata_dir")
         )
-        logging.debug(f"file pattern = {var_dict['files']['pattern']}")
-        logging.debug(f"regex = {r}")
-        logging.debug(f"file_directory = {file_directory}")
+        logger.debug(f"file pattern = {var_dict['files']['pattern']}")
+        logger.debug(f"regex = {r}")
+        logger.debug(f"file_directory = {file_directory}")
         all_files = []
         for rootname, _, filenames in os.walk(file_directory):
             for filename in filenames:
@@ -426,15 +472,15 @@ class Preprocess(Scope):
                 all_files.append(full_name)
             break  # Do not go into subdirectories
         all_files = sorted(all_files)
-        logging.debug("All files:")
+        logger.debug("All files:")
         for f in all_files:
-            logging.debug(f"* {f}")
+            logger.debug(f"* {f}")
 
         # Just the matching files:
         matching_files = sorted([f for f in all_files if r.match(os.path.basename(f))])
-        logging.debug("Matching files:")
+        logger.debug("Matching files:")
         for f in matching_files:
-            logging.debug(f"* {f}")
+            logger.debug(f"* {f}")
         if "take" in var_dict["files"]:
             if var_dict["files"]["take"].get("what") == "files":
                 if "newest" in var_dict["files"]["take"]:
@@ -460,7 +506,7 @@ class Preprocess(Scope):
                         "Get specific timesteps not yet implemented!"
                     )
                 raise SyntaxError("You must specify newest, oldest, or specific!")
-            pprint.pprint(var_dict)
+            logger.error(var_dict)
             raise SyntaxError(
                 """
                 You specified take in YAML, but didn't specify what to take.
@@ -475,8 +521,8 @@ class Preprocess(Scope):
 
         Given a variable name and a description dictionary of how it should be
         extracted and processed, this method makes a temporary file,
-        ``<sender_name>_<varname>_file_for_scope.nc``, e.g.
-        ``echam_temp2_file_for_scope.nc`` in the ``couple_dir``.
+        ``<sender_name>_<varname>_file_for_scope.dat``, e.g.
+        ``echam_temp2_file_for_scope.dat`` in the ``couple_dir``.
 
         Parameters
         ----------
@@ -491,9 +537,9 @@ class Preprocess(Scope):
         In addition to the dictionary description of ``files``, further
         information may be added with the following top-level keys:
 
-        * ``code table`` describing which ``GRIB`` code numbers correspond to
+        * ``code_table`` describing which ``GRIB`` code numbers correspond to
           which variables. If not given, the fallback value is the value of
-          ``code table`` in the sender configuration.
+          ``code_table`` in the sender configuration.
 
         Converts any input file to ``nc`` via `cdo`. Runs both ``select`` and
         ``settable``.
@@ -504,16 +550,30 @@ class Preprocess(Scope):
 
         """
         flist = self._construct_filelist(var_dict)
-        logging.debug("The following files will be used for: %s", varname)
+        logger.debug(f"The following files will be used for: {varname}")
         for f in flist:
-            logging.debug("- %s", f)
+            logger.debug(f"- {f}")
         code_table = var_dict.get(
-            "code table", self.config[self.whos_turn].get("code table")
+            "code_table", self.config[self.whos_turn].get("code_table")
         )
-        code_table_command = f"-t {code_table}" if code_table else ""
+        code_table_command = f" -t {code_table}" if code_table else ""
+        convert_to_netcdf = var_dict.get(
+            "convert_to_netcdf",
+            self.config[self.whos_turn].get("convert_to_netcdf", True),
+        )
+        logger.debug(f"{varname} will be converted to netcdf? {convert_to_netcdf}")
+        convert_command = " -f nc" if convert_to_netcdf else ""
+        ofile = (
+            self.config["scope"]["couple_dir"]
+            + "/"
+            + self.whos_turn
+            + "_"
+            + varname
+            + "_file_for_scope.dat"
+        )
         cdo_command = (
             self.get_cdo_prefix()
-            + " -f nc "
+            + convert_command
             + " "
             + code_table_command
             + " -select,name="
@@ -521,12 +581,7 @@ class Preprocess(Scope):
             + " "
             + " ".join(flist)
             + " "
-            + self.config["scope"]["couple_dir"]
-            + "/"
-            + self.whos_turn
-            + "_"
-            + varname
-            + "_file_for_scope.nc"
+            + ofile
         )
 
         click.secho(
@@ -534,23 +589,27 @@ class Preprocess(Scope):
         )
         click.secho(cdo_command, fg="cyan")
         subprocess.run(cdo_command, shell=True, check=True)
+        self.combine_list.append(ofile)
 
     def _run_cdo_for_variable(self, variable_name, variable_dict):
+        var_dict = variable_dict
         if "cdo" in variable_dict:
             cdo_commands = variable_dict["cdo"]
+            code_table = var_dict.get(
+                "code_table", self.config[self.whos_turn].get("code_table")
+            )
+            code_table_command = f" -t {code_table}" if code_table else ""
+            convert_to_netcdf = var_dict.get(
+                "convert_to_netcdf",
+                self.config[self.whos_turn].get("convert_to_netcdf", True),
+            )
+            convert_command = " -f nc" if convert_to_netcdf else ""
             try:
                 assert isinstance(cdo_commands, list)
             except AssertionError:
-                print("ERROR -- you need to have all cdo commands as a list!")
+                logger.error("ERROR -- you need to have all cdo commands as a list!")
                 sys.exit(1)
-            original_input = (
-                self.config["scope"]["couple_dir"]
-                + "/"
-                + self.whos_turn
-                + "_"
-                + variable_name
-                + "_file_for_scope.nc"
-            )
+            original_input = self.combine_list.pop()
             for tmp_file_counter, cdo_command in enumerate(cdo_commands):
                 output_file = (
                     self.config["scope"]["couple_dir"]
@@ -560,7 +619,6 @@ class Preprocess(Scope):
                     + variable_name
                     + "_cdo_transform_"
                     + str(tmp_file_counter)
-                    + ".nc"
                 )
                 if tmp_file_counter == 0:
                     input_file = original_input
@@ -573,11 +631,12 @@ class Preprocess(Scope):
                         + variable_name
                         + "_cdo_transform_"
                         + str(tmp_file_counter - 1)
-                        + ".nc"
                     )
                 cdo_command = (
                     self.get_cdo_prefix()
-                    + " -f nc "
+                    + convert_command
+                    + " "
+                    + code_table_command
                     + " "
                     + cdo_command
                     + " "
@@ -588,21 +647,35 @@ class Preprocess(Scope):
                 click.secho(cdo_command, fg="cyan")
                 subprocess.run(cdo_command, shell=True, check=True)
             click.secho(
-                f"Moving last fine {output_file} back to {original_input}", fg="cyan"
+                f"Moving last file {output_file} back to {original_input}", fg="cyan"
             )
             os.rename(output_file, original_input)
+            renamed_file = rename_with_suggested_fileext(original_input)
+            self.combine_list.append(renamed_file)
 
     def _rename_send_as_variables(self, variable_name, variable_dict):
+        var_dict = variable_dict
         if "send_as" in variable_dict:
             send_as = variable_dict["send_as"]
-            fin = (
-                self.config["scope"]["couple_dir"]
-                + "/"
-                + self.whos_turn
-                + "_"
-                + variable_name
-                + "_file_for_scope.nc"
+            code_table = var_dict.get(
+                "code_table", self.config[self.whos_turn].get("code_table")
             )
+            code_table_command = f" -t {code_table}" if code_table else ""
+            convert_to_netcdf = var_dict.get(
+                "convert_to_netcdf",
+                self.config[self.whos_turn].get("convert_to_netcdf", True),
+            )
+            convert_command = " -f nc" if convert_to_netcdf else ""
+            fin = self.combine_list.pop()
+            if (
+                "netcdf" not in determine_fileextension(fin).lower()
+                and not convert_to_netcdf
+            ):
+                logger.error("You gave a {determine_fileextension(fin).lower()} file")
+                logger.error(
+                    "Sorry, renaming with >>send as<< does not work for non-netcdf files, as internal metadata is not preserved!"
+                )
+                return fin
             fout = (
                 self.config["scope"]["couple_dir"]
                 + "/"
@@ -615,7 +688,9 @@ class Preprocess(Scope):
             )
             cdo_command = (
                 self.get_cdo_prefix()
-                + " -f nc "
+                + convert_command
+                + " "
+                + code_table_command
                 + " "
                 + f"chname,{variable_name},{send_as} {fin} {fout}"
             )
@@ -625,11 +700,13 @@ class Preprocess(Scope):
                 f"Moving renamed variable in file {fout} back to {fin}", fg="cyan"
             )
             os.rename(fout, fin)
+            self.combine_list.append(fin)
+            return fin
 
     # TODO/FIXME: This function does not work correctly if there are different
     # time axis for each variable. It might be better to just leave each
     # variable in it's own file.
-    def _combine_tmp_variable_files(self, reciever_type):
+    def _combine_tmp_variable_files(self, reciever_type, files_to_combine):
         """
         Combines all files in the couple directory for a particular reciever type.
 
@@ -651,21 +728,10 @@ class Preprocess(Scope):
         This executes a ``cdo merge`` command to concatenate all files found which
         should be sent to particular model.
         """
-        logging.debug(reciever_type)
-        reciever = (
-            self.config.get(self.whos_turn, {}).get("send", {}).get(reciever_type, {})
-        )
-        variables_to_send_to_reciever = list(reciever)
-        files_to_combine = []
-        for f in os.listdir(self.config["scope"]["couple_dir"]):
-            fvar = f.replace(self.whos_turn + "_", "").replace("_file_for_scope.nc", "")
-            if fvar in variables_to_send_to_reciever:
-                files_to_combine.append(
-                    os.path.join(self.config["scope"]["couple_dir"], f)
-                )
+        logger.debug(reciever_type)
         output_file = os.path.join(
             self.config["scope"]["couple_dir"],
-            self.config[self.whos_turn]["type"] + "_file_for_" + reciever_type + ".nc",
+            self.config[self.whos_turn]["type"] + "_file_for_" + reciever_type + ".dat",
         )
         cdo_command = (
             self.get_cdo_prefix()
@@ -680,28 +746,26 @@ class Preprocess(Scope):
         subprocess.run(cdo_command, shell=True, check=True)
 
 
-class Regrid(Scope):
-    def _calculate_weights(self, Model, Type, Interp):
+class Recieve(Scope):
+    def _calculate_weights(self, model, type_, interp):
         regrid_weight_file = os.path.join(
             self.config["scope"]["couple_dir"],
-            "_".join([self.config[Model]["type"], Type, Interp, "weight_file.nc"]),
+            "_".join([self.config[model]["type"], type_, interp, "weight_file.nc"]),
         )
 
         cdo_command = (
             self.get_cdo_prefix()
             + " gen"
-            + Interp
+            + interp
             + ","
-            + self.config["scope"]["couple_dir"]
-            + "/"
-            + self.config[Model]["griddes"]
+            + self.config[model]["griddes"]
             + " "
             + self.config["scope"]["couple_dir"]
             + "/"
-            + Type
+            + type_
             + "_file_for_"
-            + self.config[Model]["type"]
-            + ".nc"
+            + self.config[model]["type"]
+            + ".dat"
             + " "
             + regrid_weight_file
         )
@@ -712,52 +776,195 @@ class Regrid(Scope):
             subprocess.run(cdo_command, shell=True, check=True)
         return regrid_weight_file
 
-    def regrid(self):
+    def recieve(self):
         if self.config[self.whos_turn].get("recieve"):
             for sender_type in self.config[self.whos_turn].get("recieve"):
+                self.combine_lists = {}
                 if self.config[self.whos_turn]["recieve"].get(sender_type):
-                    for Variable in self.config[self.whos_turn]["recieve"].get(
+                    for variable in self.config[self.whos_turn]["recieve"].get(
                         sender_type
                     ):
-                        Model = self.whos_turn
-                        Type = sender_type
-                        Interp = (
+                        model = self.whos_turn
+                        type_ = sender_type
+                        target_file = (
                             self.config[self.whos_turn]
                             .get("recieve")
                             .get(sender_type)
-                            .get(Variable)
+                            .get(variable)
+                            .get("target_file")
+                        )
+                        self.combine_lists.setdefault(target_file, [])
+                        interp = (
+                            self.config[self.whos_turn]
+                            .get("recieve")
+                            .get(sender_type)
+                            .get(variable)
                             .get("interp")
                         )
-                        self.regrid_one_var(Model, Type, Interp, Variable)
+                        if "receive_from" in self.config[self.whos_turn].get(
+                            "recieve"
+                        ).get(sender_type).get(variable):
+                            recv_from = (
+                                self.config[self.whos_turn]
+                                .get("recieve")
+                                .get(sender_type)
+                                .get(variable)
+                                .get("receive_from")
+                            )
+                            self.regrid_recieve_from(
+                                model, type_, interp, variable, target_file, recv_from
+                            )
+                        else:
+                            self.regrid_one_var(
+                                model, type_, interp, variable, target_file
+                            )
+                        # Run CDOs:
+                        if "cdo" in self.config[self.whos_turn].get("recieve").get(
+                            sender_type
+                        ).get(variable):
+                            cdo_commands = (
+                                self.config[self.whos_turn]
+                                .get("recieve")
+                                .get(sender_type)
+                                .get(variable)
+                                .get("cdo")
+                            )
+                            self.run_cdos(
+                                model, type_, variable, target_file, cdo_commands
+                            )
+                logger.debug(f"Files to be merged for {sender_type}:")
+                for target_file in self.combine_lists:
+                    logger.debug(target_file)
+                    for f in self.combine_lists[target_file]:
+                        logger.debug(f"* {f}")
+                    self._combine_tmp_variable_files(
+                        target_file, self.combine_lists[target_file]
+                    )
 
-    def regrid_one_var(self, Model, Type, Interp, Variable):
-        weight_file = self._calculate_weights(Model, Type, Interp)
+    def _combine_tmp_variable_files(self, target_file, source_files):
+        output_file = target_file
+        cdo_command = (
+            self.get_cdo_prefix()
+            + " merge "
+            + " ".join(source_files)
+            + " "
+            + output_file
+        )
+        click.secho("Combine files after processing")
+        click.secho(cdo_command, fg="cyan")
+        subprocess.run(cdo_command, shell=True, check=True)
+
+    def run_cdos(self, model, type_, variable, target_file, cdo_commands):
+        original_ifile = self.combine_lists[target_file].pop()
+        file_stub = original_ifile.replace(".dat", "_")
+        for command_counter, command in enumerate(cdo_commands):
+            logger.debug(f"command_counter={command_counter}")
+            logger.debug(f"command={command}")
+            ofile = file_stub + str(command_counter) + ".dat"
+            if command_counter == 0:
+                ifile = original_ifile
+            else:
+                ifile = file_stub + str(command_counter - 1) + ".dat"
+            cdo_command = (
+                self.get_cdo_prefix() + " " + command + " " + ifile + " " + ofile
+            )
+            click.secho(cdo_command, fg="cyan")
+            subprocess.run(cdo_command, shell=True, check=True)
+        # Move back to original infile:
+        os.rename(ofile, original_ifile)
+        self.combine_lists[target_file].append(original_ifile)
+
+    def regrid_recieve_from(
+        self, model, type_, interp, variable, target_file, recv_from
+    ):
+        weight_file = self._calculate_weights(model, type_, interp)
         cdo_command = (
             self.get_cdo_prefix()
             + " remap,"
-            + self.config[Model]["griddes"]
+            + self.config[model]["griddes"]
             + ","
             + weight_file
             + " "
             + "-selvar,"
-            + Variable
+            + ",".join(recv_from)
             + " "
-            + Type
+            + self.config["scope"]["couple_dir"]
+            + "/"
+            + type_
             + "_file_for_"
-            + self.config[Model]["type"]
-            + ".nc "
-            + Type
+            + self.config[model]["type"]
+            + ".dat "
+            + self.config["scope"]["couple_dir"]
+            + "/"
+            + type_
             + "_"
-            + Variable
+            + variable
             + "_for_"
-            + self.config[Model]["type"]
+            + self.config[model]["type"]
             + "_on_"
-            + self.config[Model]["type"]
-            + "_grid.nc"
+            + self.config[model]["type"]
+            + "_grid.dat"
+        )
+        click.secho("Remapping (with recieve_from): ", fg="cyan")
+        click.secho(cdo_command, fg="cyan")
+        subprocess.run(cdo_command, shell=True, check=True)
+        self.combine_lists[target_file].append(
+            self.config["scope"]["couple_dir"]
+            + "/"
+            + type_
+            + "_"
+            + variable
+            + "_for_"
+            + self.config[model]["type"]
+            + "_on_"
+            + self.config[model]["type"]
+            + "_grid.dat"
+        )
+
+    def regrid_one_var(self, model, type_, interp, variable, target_file):
+        weight_file = self._calculate_weights(model, type_, interp)
+        cdo_command = (
+            self.get_cdo_prefix()
+            + " remap,"
+            + self.config[model]["griddes"]
+            + ","
+            + weight_file
+            + " "
+            + "-selvar,"
+            + variable
+            + " "
+            + self.config["scope"]["couple_dir"]
+            + "/"
+            + type_
+            + "_file_for_"
+            + self.config[model]["type"]
+            + ".dat "
+            + self.config["scope"]["couple_dir"]
+            + "/"
+            + type_
+            + "_"
+            + variable
+            + "_for_"
+            + self.config[model]["type"]
+            + "_on_"
+            + self.config[model]["type"]
+            + "_grid.dat"
         )
         click.secho("Remapping: ", fg="cyan")
         click.secho(cdo_command, fg="cyan")
         subprocess.run(cdo_command, shell=True, check=True)
+        self.combine_lists[target_file].append(
+            self.config["scope"]["couple_dir"]
+            + "/"
+            + type_
+            + "_"
+            + variable
+            + "_for_"
+            + self.config[model]["type"]
+            + "_on_"
+            + self.config[model]["type"]
+            + "_grid.dat"
+        )
 
 
 # -*- coding: utf-8 -*-
